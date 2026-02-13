@@ -41,6 +41,14 @@ func main() {
 	// Start the UI in a goroutine
 	go runUI(ctx)
 
+	// Start the subprocess
+	compile_done := make(chan struct{})
+	manager, err := NewSubprocessManager(compile_done)
+	if err != nil {
+		log.Fatalf("Failed to create subproccess manager: %v", err)
+	}
+	go manager.Start()
+
 	// Start the web server
 	go startServer(bind)
 
