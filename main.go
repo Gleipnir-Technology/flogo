@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,40 +11,154 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/gdamore/tcell/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
 var (
-	upstreamURL *url.URL
+	upstreamURL      *url.URL
+	isCompiling      bool
+	lastBuildOutput  string
+	lastBuildSuccess bool
+	uiMutex          sync.Mutex
+	screen           tcell.Screen
 )
 
+type UIState struct {
+	isCompiling      bool
+	lastBuildOutput  string
+	lastBuildSuccess bool
+}
+
 func main() {
+	// Initialize tcell screen
+	var err error
+	screen, err = tcell.NewScreen()
+	if err != nil {
+		log.Fatalf("Error creating screen: %v", err)
+	}
+	if err := screen.Init(); err != nil {
+		log.Fatalf("Error initializing screen: %v", err)
+	}
+	defer screen.Fini()
+
+	// Set default style and clear screen
+	defStyle := tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
+	screen.SetStyle(defStyle)
+	screen.Clear()
+
 	// Get the upstream URL from environment variable
 	upstream := os.Getenv("FLOGO_UPSTREAM")
 	if upstream == "" {
 		upstream = "http://localhost:8080" // Default if not specified
 	}
 
-	var err error
 	upstreamURL, err = url.Parse(upstream)
 	if err != nil {
 		log.Fatalf("Invalid FLOGO_UPSTREAM URL: %v", err)
 	}
 
-	fmt.Printf("Using upstream server: %s\n", upstreamURL.String())
+	// Create a context that we can cancel
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start the UI in a goroutine
+	go runUI(ctx)
 
 	// Start the web server
 	go startServer()
 	
 	// Start the file watcher
-	setupWatcher()
+	go setupWatcher()
 	
-	// Keep the main goroutine running
-	select {}
+	// Handle keyboard input
+	for {
+		ev := screen.PollEvent()
+		switch ev := ev.(type) {
+		case *tcell.EventKey:
+			if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
+				return
+			}
+		case *tcell.EventResize:
+			screen.Sync()
+		}
+	}
+}
+
+func runUI(ctx context.Context) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			uiMutex.Lock()
+			state := UIState{
+				isCompiling:      isCompiling,
+				lastBuildOutput:  lastBuildOutput,
+				lastBuildSuccess: lastBuildSuccess,
+			}
+			uiMutex.Unlock()
+			
+			drawUI(state)
+		}
+	}
+}
+
+func drawUI(state UIState) {
+	screen.Clear()
+	
+	// Draw title
+	drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorWhite).Bold(true), "FLOGO - Go Web Development Tool")
+	drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorWhite), "Press ESC or Ctrl+C to exit")
+	
+	// Draw upstream info
+	drawText(0, 3, tcell.StyleDefault.Foreground(tcell.ColorYellow), fmt.Sprintf("Upstream: %s", upstreamURL.String()))
+	
+	// Draw status
+	statusStyle := tcell.StyleDefault.Foreground(tcell.ColorGreen)
+	statusText := "Idle"
+	
+	if state.isCompiling {
+		statusStyle = tcell.StyleDefault.Foreground(tcell.ColorYellow)
+		statusText = "Compiling..."
+	} else if !state.lastBuildSuccess && state.lastBuildOutput != "" {
+		statusStyle = tcell.StyleDefault.Foreground(tcell.ColorRed)
+		statusText = "Build Failed"
+	}
+	
+	drawText(0, 5, statusStyle.Bold(true), fmt.Sprintf("Status: %s", statusText))
+	
+	// Draw last build output if there was an error
+	if !state.lastBuildSuccess && state.lastBuildOutput != "" {
+		drawText(0, 7, tcell.StyleDefault.Foreground(tcell.ColorRed).Bold(true), "Build Errors:")
+		
+		// Split output into lines and display them
+		lines := strings.Split(state.lastBuildOutput, "\n")
+		for i, line := range lines {
+			if i < 15 { // Limit number of lines to avoid overflow
+				drawText(2, 8+i, tcell.StyleDefault.Foreground(tcell.ColorWhite), line)
+			} else if i == 15 {
+				drawText(2, 8+i, tcell.StyleDefault.Foreground(tcell.ColorWhite), "... (more errors)")
+				break
+			}
+		}
+	}
+	
+	screen.Show()
+}
+
+func drawText(x, y int, style tcell.Style, text string) {
+	for i, r := range text {
+		screen.SetContent(x+i, y, r, nil, style)
+	}
 }
 
 func startServer() {
@@ -55,8 +170,9 @@ func startServer() {
 	// Use the proxy handler for all routes
 	r.HandleFunc("/*", proxyHandler)
 	
-	fmt.Println("Flogo server starting on :10000")
-	http.ListenAndServe(":10000", r)
+	// Log to the console instead of drawing to the UI directly
+	log.Println("Flogo server starting on :3000")
+	http.ListenAndServe(":3000", r)
 }
 
 func proxyHandler(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +232,7 @@ func setupWatcher() {
 					// Debounce multiple events by waiting a little
 					time.Sleep(100 * time.Millisecond)
 					
-					fmt.Printf("Go file modified: %s\n", event.Name)
+					log.Printf("Go file modified: %s\n", event.Name)
 					buildProject()
 				}
 				
@@ -151,22 +267,33 @@ func setupWatcher() {
 		log.Fatal(err)
 	}
 	
-	fmt.Println("Watcher started. Monitoring for changes...")
+	log.Println("Watcher started. Monitoring for changes...")
 	
 	// Do an initial build
 	buildProject()
 }
 
 func buildProject() {
-	fmt.Println("Building project...")
+	uiMutex.Lock()
+	isCompiling = true
+	uiMutex.Unlock()
+	
+	log.Println("Building project...")
 	
 	cmd := exec.Command("go", "build", ".")
 	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
+	
+	uiMutex.Lock()
+	isCompiling = false
+	lastBuildOutput = outputStr
+	lastBuildSuccess = (err == nil)
+	uiMutex.Unlock()
 	
 	if err != nil {
-		fmt.Println("Build failed:")
-		fmt.Println(string(output))
+		log.Println("Build failed:")
+		log.Println(outputStr)
 	} else {
-		fmt.Println("Build succeeded!")
+		log.Println("Build succeeded!")
 	}
 }
