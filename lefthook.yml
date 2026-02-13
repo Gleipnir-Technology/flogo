@@ -1,0 +1,14 @@
+pre-commit:
+  commands:
+    check-ssh-identity:
+      run: |
+        # Check if any SSH identities are available
+        if ! ssh-add -l &>/dev/null || [ "$(ssh-add -l 2>/dev/null | grep -v 'The agent has no identities.')" = "" ]; then
+          echo "Error: No SSH identities found in your SSH agent."
+          echo "Please run 'ssh-add' to add your SSH key before committing."
+          exit 1
+        fi
+    gofmt:
+      glob: "*.go"
+      run: gofmt -w {staged_files}
+      stage_fixed: true
