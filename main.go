@@ -7,12 +7,10 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/gdamore/tcell/v2"
 )
 
@@ -67,10 +65,10 @@ func main() {
 
 	// Start the web server
 	go startServer()
-	
+
 	// Start the file watcher
 	go setupWatcher()
-	
+
 	// Handle keyboard input
 	for {
 		ev := screen.PollEvent()
@@ -101,7 +99,7 @@ func runUI(ctx context.Context) {
 				lastBuildSuccess: lastBuildSuccess,
 			}
 			uiMutex.Unlock()
-			
+
 			drawUI(state)
 		}
 	}
@@ -109,18 +107,18 @@ func runUI(ctx context.Context) {
 
 func drawUI(state UIState) {
 	screen.Clear()
-	
+
 	// Draw title
 	drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorWhite).Bold(true), "FLOGO - Go Web Development Tool")
 	drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorWhite), "Press ESC or Ctrl+C to exit")
-	
+
 	// Draw upstream info
 	drawText(0, 3, tcell.StyleDefault.Foreground(tcell.ColorYellow), fmt.Sprintf("Upstream: %s", upstreamURL.String()))
-	
+
 	// Draw status
 	statusStyle := tcell.StyleDefault.Foreground(tcell.ColorGreen)
 	statusText := "Idle"
-	
+
 	if state.isCompiling {
 		statusStyle = tcell.StyleDefault.Foreground(tcell.ColorYellow)
 		statusText = "Compiling..."
@@ -128,13 +126,13 @@ func drawUI(state UIState) {
 		statusStyle = tcell.StyleDefault.Foreground(tcell.ColorRed)
 		statusText = "Build Failed"
 	}
-	
+
 	drawText(0, 5, statusStyle.Bold(true), fmt.Sprintf("Status: %s", statusText))
-	
+
 	// Draw last build output if there was an error
 	if !state.lastBuildSuccess && state.lastBuildOutput != "" {
 		drawText(0, 7, tcell.StyleDefault.Foreground(tcell.ColorRed).Bold(true), "Build Errors:")
-		
+
 		// Split output into lines and display them
 		lines := strings.Split(state.lastBuildOutput, "\n")
 		for i, line := range lines {
@@ -146,7 +144,7 @@ func drawUI(state UIState) {
 			}
 		}
 	}
-	
+
 	screen.Show()
 }
 
@@ -156,89 +154,23 @@ func drawText(x, y int, style tcell.Style, text string) {
 	}
 }
 
-func setupWatcher() {
-	// Create a new watcher
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Fatal(err)
-	}
-	
-	// Start watching in a goroutine
-	go func() {
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				
-				// Check if it's a .go file and if it was modified, created, or renamed
-				if filepath.Ext(event.Name) == ".go" && 
-					(event.Op&fsnotify.Write == fsnotify.Write || 
-					event.Op&fsnotify.Create == fsnotify.Create || 
-					event.Op&fsnotify.Rename == fsnotify.Rename) {
-					
-					// Debounce multiple events by waiting a little
-					time.Sleep(100 * time.Millisecond)
-					
-					log.Printf("Go file modified: %s\n", event.Name)
-					buildProject()
-				}
-				
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				log.Println("Error:", err)
-			}
-		}
-	}()
-
-	// Recursively add directories to watch
-	err = filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		
-		// Skip hidden directories and vendor
-		if info.IsDir() && (strings.HasPrefix(info.Name(), ".") || info.Name() == "vendor") {
-			return filepath.SkipDir
-		}
-		
-		// Add directories to watch
-		if info.IsDir() {
-			return watcher.Add(path)
-		}
-		return nil
-	})
-	
-	if err != nil {
-		log.Fatal(err)
-	}
-	
-	log.Println("Watcher started. Monitoring for changes...")
-	
-	// Do an initial build
-	buildProject()
-}
-
 func buildProject() {
 	uiMutex.Lock()
 	isCompiling = true
 	uiMutex.Unlock()
-	
+
 	log.Println("Building project...")
-	
+
 	cmd := exec.Command("go", "build", ".")
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
-	
+
 	uiMutex.Lock()
 	isCompiling = false
 	lastBuildOutput = outputStr
 	lastBuildSuccess = (err == nil)
 	uiMutex.Unlock()
-	
+
 	if err != nil {
 		log.Println("Build failed:")
 		log.Println(outputStr)
