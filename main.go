@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +17,25 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
+var (
+	upstreamURL *url.URL
+)
+
 func main() {
+	// Get the upstream URL from environment variable
+	upstream := os.Getenv("FLOGO_UPSTREAM")
+	if upstream == "" {
+		upstream = "http://localhost:8080" // Default if not specified
+	}
+
+	var err error
+	upstreamURL, err = url.Parse(upstream)
+	if err != nil {
+		log.Fatalf("Invalid FLOGO_UPSTREAM URL: %v", err)
+	}
+
+	fmt.Printf("Using upstream server: %s\n", upstreamURL.String())
+
 	// Start the web server
 	go startServer()
 	
@@ -32,12 +52,43 @@ func startServer() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello, World!"))
-	})
+	// Use the proxy handler for all routes
+	r.HandleFunc("/*", proxyHandler)
 	
-	fmt.Println("Server starting on :3000")
-	http.ListenAndServe(":3000", r)
+	fmt.Println("Flogo server starting on :10000")
+	http.ListenAndServe(":10000", r)
+}
+
+func proxyHandler(w http.ResponseWriter, r *http.Request) {
+	// Check if upstream is alive
+	if !isUpstreamAlive() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("Upstream server is not available. Your application is either starting up or has errors."))
+		return
+	}
+	
+	// Create a reverse proxy
+	proxy := httputil.NewSingleHostReverseProxy(upstreamURL)
+	
+	// Update the headers to allow for SSL redirection
+	r.URL.Host = upstreamURL.Host
+	r.URL.Scheme = upstreamURL.Scheme
+	r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
+	r.Host = upstreamURL.Host
+
+	proxy.ServeHTTP(w, r)
+}
+
+func isUpstreamAlive() bool {
+	client := http.Client{
+		Timeout: 100 * time.Millisecond,
+	}
+	resp, err := client.Get(upstreamURL.String())
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode < 500 // Consider any status below 500 as "alive"
 }
 
 func setupWatcher() {
