@@ -1,3 +1,41 @@
-<html>
-	<h1>Hello</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSE Demo</title>
+</head>
+<body>
+    <h1>Server-Sent Events Demo</h1>
+    <div id="status">Connecting to server...</div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Create an EventSource instance pointing to our SSE endpoint
+            const eventSource = new EventSource('/events');
+            
+            // Handle connection open
+            eventSource.onopen = function() {
+                console.log('SSE connection established');
+                document.getElementById('status').textContent = 'Connected to server';
+            };
+            
+            // Handle messages (events without a specific type)
+            eventSource.onmessage = function(event) {
+                console.log('Received message:', event.data);
+            };
+            
+            // Handle "connected" event specifically
+            eventSource.addEventListener('connected', function(event) {
+                console.log('Connected event received:', event.data);
+            });
+            
+            // Handle errors
+            eventSource.onerror = function(error) {
+                console.error('SSE error:', error);
+                document.getElementById('status').textContent = 'Connection error - check console';
+            };
+        });
+    </script>
+</body>
 </html>
