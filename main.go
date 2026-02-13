@@ -19,6 +19,10 @@ func main() {
 	initUI()
 	defer screen.Fini()
 
+	bind := os.Getenv("FLOGO_BIND")
+	if bind == "" {
+		bind = ":10000" // Default if not specified
+	}
 	// Get the upstream URL from environment variable
 	upstream := os.Getenv("FLOGO_UPSTREAM")
 	if upstream == "" {
@@ -38,7 +42,7 @@ func main() {
 	go runUI(ctx)
 
 	// Start the web server
-	go startServer()
+	go startServer(bind)
 
 	// Start the file watcher
 	go setupWatcher()
