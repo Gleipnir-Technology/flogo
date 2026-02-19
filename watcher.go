@@ -63,8 +63,8 @@ func (w Watcher) Run(ctx context.Context) {
 			// Check if it's a .go file and if it was modified, created, or renamed
 			if filepath.Ext(event.Name) == ".go" &&
 				(event.Op&fsnotify.Write == fsnotify.Write ||
-					event.Op&fsnotify.Create == fsnotify.Create ||
-					event.Op&fsnotify.Rename == fsnotify.Rename) {
+					event.Op&fsnotify.Create == fsnotify.Create) {
+				//event.Op&fsnotify.Rename == fsnotify.Rename) {
 
 				typestring := eventToString(event)
 				logger.Info().Str("name", event.Name).Str("type", typestring).Msg("notify event")
@@ -92,7 +92,7 @@ var eventTypeToSymbol = []opPair{
 	opPair{Op: fsnotify.Create, Sym: "C"},
 	opPair{Op: fsnotify.Write, Sym: "W"},
 	opPair{Op: fsnotify.Remove, Sym: "D"},
-	opPair{Op: fsnotify.Rename, Sym: "R"},
+	//opPair{Op: fsnotify.Rename, Sym: "R"},
 }
 
 func eventToString(event fsnotify.Event) string {

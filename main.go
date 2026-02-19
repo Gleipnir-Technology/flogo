@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -70,7 +71,9 @@ func main() {
 	go watcher.Run(ctx)
 
 	builder := Builder{
-		ToBuild: to_build_chan,
+		Debounce: time.Millisecond * 300,
+		OnDeath:  something_died,
+		ToBuild:  to_build_chan,
 	}
 	go builder.Run(ctx)
 

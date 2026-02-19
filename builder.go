@@ -14,21 +14,21 @@ import (
 )
 
 type Builder struct {
-	ToBuild <-chan struct{}
-	OnDeath chan<- error
+	Debounce time.Duration
+	OnDeath  chan<- error
+	ToBuild  <-chan struct{}
 }
 
 func (b Builder) Run(ctx context.Context) {
-	//logger := log.Ctx(ctx)
+	logger := log.Ctx(ctx)
+	debounce := newDebounce(ctx, b.Debounce)
 	for {
 		select {
-		case _ = <-b.ToBuild:
-			err := b.BuildProject(ctx)
-			if err != nil {
-				b.OnDeath <- fmt.Errorf("Builder death: %w", err)
-				return
-			}
-
+		case <-b.ToBuild:
+			debounce(b.BuildProject(ctx))
+		case <-ctx.Done():
+			logger.Info().Msg("Shutdown builder")
+			return
 		}
 	}
 }
@@ -59,16 +59,21 @@ func NewCompilerManager() *CompilerManager {
 }
 
 // BuildProject builds the Go project
-func (b Builder) BuildProject(ctx context.Context) error {
-	logger := log.Ctx(ctx)
-	cmd := exec.CommandContext(ctx, "go", "build", ".")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("go build cmd: %w", err)
+func (b Builder) BuildProject(ctx context.Context) debouncedFunc {
+	return func() {
+		logger := log.Ctx(ctx)
+		cmd := exec.CommandContext(ctx, "go", "build", ".")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			b.onError(fmt.Errorf("go build cmd: %w", err))
+		}
+		outputStr := string(output)
+		logger.Info().Str("out", outputStr).Msg("build")
 	}
-	outputStr := string(output)
-	logger.Info().Str("out", outputStr).Msg("build")
-	return nil
+}
+
+func (b Builder) onError(err error) {
+	log.Error().Err(err).Msg("HANDLE THIS")
 }
 
 // determineBuildOutputName determines the build output name from the go.mod file
