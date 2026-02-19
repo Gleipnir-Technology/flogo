@@ -14,6 +14,7 @@ import (
 type ui struct {
 	screen tcell.Screen
 	state  uiState
+	target string
 }
 type uiState struct {
 	isCompiling      bool
@@ -21,7 +22,7 @@ type uiState struct {
 	lastBuildSuccess bool
 }
 
-func newUI() (*ui, error) {
+func newUI(target string) (*ui, error) {
 	screen, err := tcell.NewScreen()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create screen: %w", err)
@@ -37,6 +38,7 @@ func newUI() (*ui, error) {
 			lastBuildOutput:  "no output",
 			lastBuildSuccess: true,
 		},
+		target: target,
 	}, nil
 }
 func (u ui) EventQ() chan tcell.Event {
@@ -107,7 +109,7 @@ func (u ui) drawUI() {
 	u.screen.Clear()
 
 	// Draw title
-	u.drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorWhite).Bold(true), "FLOGO - Go Web Development Tool")
+	u.drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorWhite).Bold(true), fmt.Sprintf("FLOGO - %s", u.target))
 	u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorWhite), "Press ESC or Ctrl+C to exit")
 
 	// Draw upstream info
