@@ -96,14 +96,21 @@ func (b Builder) BuildProject(ctx context.Context) debouncedFunc {
 			return
 		}
 		b.onBuildStart("go build .")
-		err = cmd.Wait()
+		stderr_b, err := io.ReadAll(stderr)
 		if err != nil {
-			logger.Error().Msg("no start")
-			b.onBuildFailure("no wait")
+			b.onBuildFailure(fmt.Sprintf("Failed to read stderr: %+v", err))
 			return
 		}
-		stderr_b, err := io.ReadAll(stderr)
 		stdout_b, err := io.ReadAll(stdout)
+		if err != nil {
+			b.onBuildFailure(fmt.Sprintf("Failed to read stdout: %+v", err))
+			return
+		}
+		err = cmd.Wait()
+		if err != nil {
+			b.onBuildFailure(string(stderr_b))
+			return
+		}
 		logger.Info().Bytes("stdout", stdout_b).Bytes("stderr", stderr_b).Msg("build complete")
 		b.onBuildSuccess(string(stdout_b))
 	}
