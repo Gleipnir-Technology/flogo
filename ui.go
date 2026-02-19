@@ -110,10 +110,8 @@ func (u ui) drawUI() {
 
 	// Draw title
 	u.drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorWhite).Bold(true), fmt.Sprintf("FLOGO - %s", u.target))
-	u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorWhite), "Press ESC or Ctrl+C to exit")
-
 	// Draw upstream info
-	u.drawText(0, 3, tcell.StyleDefault.Foreground(tcell.ColorYellow), fmt.Sprintf("Upstream: %s", upstreamURL.String()))
+	//u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorYellow), fmt.Sprintf("Upstream: %s", upstreamURL.String()))
 
 	// Draw status
 	statusStyle := tcell.StyleDefault.Foreground(tcell.ColorGreen)
@@ -127,11 +125,11 @@ func (u ui) drawUI() {
 		statusText = "Build Failed"
 	}
 
-	u.drawText(0, 5, statusStyle.Bold(true), fmt.Sprintf("Status: %s", statusText))
+	u.drawText(0, 1, statusStyle.Bold(true), fmt.Sprintf("Status: %s", statusText))
 
 	// Draw last build output if there was an error
 	if !u.state.lastBuildSuccess && u.state.lastBuildOutput != "" {
-		u.drawText(0, 7, tcell.StyleDefault.Foreground(tcell.ColorRed).Bold(true), "Build Errors:")
+		u.drawText(0, 2, tcell.StyleDefault.Foreground(tcell.ColorRed).Bold(true), "Build Errors:")
 
 		// Split output into lines and display them
 		lines := strings.Split(u.state.lastBuildOutput, "\n")
