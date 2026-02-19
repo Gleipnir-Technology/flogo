@@ -112,6 +112,7 @@ func main() {
 	event_q := u.EventQ()
 	is_running := true
 	for is_running {
+		u.Sync()
 		select {
 		case death := <-something_died:
 			fmt.Printf("Death: %v\n", death)
@@ -180,7 +181,6 @@ func main() {
 				reload()
 			}
 		}
-		u.Sync()
 	}
 	cancel()
 	u.Fini()

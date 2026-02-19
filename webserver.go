@@ -23,7 +23,7 @@ func startServer(ctx context.Context, bind string, upstream url.URL) {
 	logger := log.Ctx(ctx)
 	r := chi.NewRouter()
 
-	r.Use(middleware.Logger)
+	//r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
 	proxy := httputil.NewSingleHostReverseProxy(upstreamURL)
