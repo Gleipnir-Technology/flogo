@@ -7,11 +7,13 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/gdamore/tcell/v3"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -78,41 +80,74 @@ func main() {
 	go builder.Run(ctx)
 
 	// Start the UI in a goroutine
-	//go runUI(ctx)
 
-	// Start the subprocess
-	/*compile_done := make(chan struct{})
-	manager, err := NewSubprocessManager(compile_done, *target)
+	u, err := newUI()
 	if err != nil {
-		fmt.Printf("Failed to create subproccess manager: %v\n", err)
+		fmt.Printf("Failed to create UI: %+v\n", err)
 		os.Exit(3)
 	}
-	go manager.Start()
+	defer u.Fini()
 
 	// Start the web server
 	go startServer(bind)
 
-	//initUI()
-	//defer screen.Fini()
 	// Handle keyboard input
-	for {
-		handleInput()
-	}
-	*/
+	//ui.Sync()
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	select {
-	case death := <-something_died:
-		fmt.Printf("Death: %v\n", death)
-		cancel()
-	case sig := <-c:
-		switch sig {
-		case syscall.SIGINT, syscall.SIGTERM:
+	log.Info().Msg("entering main loop")
+
+	event_q := u.EventQ()
+	is_running := true
+	for is_running {
+		select {
+		case death := <-something_died:
+			fmt.Printf("Death: %v\n", death)
 			cancel()
-		case syscall.SIGHUP:
-			reload()
+		case evt := <-event_q:
+			switch ev := evt.(type) {
+			case *tcell.EventClipboard:
+				log.Info().Msg("event clipboard")
+			case *tcell.EventError:
+				log.Info().Msg("event error")
+			case *tcell.EventFocus:
+				log.Info().Msg("event focus")
+			case *tcell.EventInterrupt:
+				log.Info().Msg("event interrupt")
+			case *tcell.EventKey:
+				if ev.Key() == tcell.KeyCtrlC {
+					is_running = false
+				}
+				log.Info().Msg("event key")
+			case *tcell.EventMouse:
+				log.Info().Msg("event mouse")
+			case *tcell.EventPaste:
+				log.Info().Msg("event paste")
+			case *tcell.EventResize:
+				log.Info().Msg("event resize")
+			case *tcell.EventTime:
+				log.Info().Msg("event time")
+			default:
+				t := reflect.TypeOf(evt)
+				if t == nil {
+					log.Info().Msg("unrecognized nil event")
+				} else {
+					log.Info().Str("type", t.Name()).Msg("unrecognized event")
+				}
+			}
+			log.Info().Msg("got event")
+
+		case sig := <-c:
+			switch sig {
+			case syscall.SIGINT, syscall.SIGTERM:
+				is_running = false
+			case syscall.SIGHUP:
+				reload()
+			}
 		}
 	}
+	cancel()
+	u.Fini()
 }
 func reload() {
 }
