@@ -12,6 +12,7 @@ import (
 )
 
 type Watcher struct {
+	OnBuild chan<- struct{}
 	OnDeath chan<- error
 	Target  string
 }
@@ -68,7 +69,7 @@ func (w Watcher) Run(ctx context.Context) {
 				typestring := eventToString(event)
 				logger.Info().Str("name", event.Name).Str("type", typestring).Msg("notify event")
 
-				buildProject(ctx)
+				emitBuildSignal(ctx)
 			}
 
 		case err, ok := <-watcher.Errors:
@@ -82,7 +83,7 @@ func (w Watcher) Run(ctx context.Context) {
 	}
 }
 
-func buildProject(ctx context.Context) {
+func emitBuildSignal(ctx context.Context) {
 	logger := log.Ctx(ctx)
 	logger.Info().Msg("fake build")
 }

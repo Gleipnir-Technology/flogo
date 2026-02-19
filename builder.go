@@ -3,14 +3,27 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
+
+type Builder struct {
+	ToBuild <-chan struct{}
+}
+
+func (b Builder) Run(ctx context.Context) {
+	logger := log.Ctx(ctx)
+	select {
+	case _ = <-b.ToBuild:
+		logger.Info().Msg("fake build")
+	}
+}
 
 // CompilerManager handles building the project and notifying the subprocess manager
 type CompilerManager struct {
@@ -58,7 +71,7 @@ func (cm *CompilerManager) BuildProject() {
 	cm.isCompiling = true
 	cm.mutex.Unlock()
 
-	log.Println("Building project...")
+	//log.Println("Building project...")
 
 	cmd := exec.CommandContext(cm.ctx, "go", "build", ".")
 	output, err := cmd.CombinedOutput()
@@ -78,10 +91,10 @@ func (cm *CompilerManager) BuildProject() {
 	cm.mutex.Unlock()
 
 	if err != nil {
-		log.Println("Build failed:")
-		log.Println(outputStr)
+		//log.Println("Build failed:")
+		//log.Println(outputStr)
 	} else {
-		log.Println("Build succeeded!")
+		//log.Println("Build succeeded!")
 
 		// If the subprocess manager exists and build succeeded, restart the process
 		if cm.subprocessMgr != nil && buildSuccess {
@@ -89,10 +102,10 @@ func (cm *CompilerManager) BuildProject() {
 				// Give the filesystem a moment to finalize the file writes
 				time.Sleep(100 * time.Millisecond)
 
-				log.Println("Restarting child process with new build...")
+				//log.Println("Restarting child process with new build...")
 				err := cm.subprocessMgr.Restart()
 				if err != nil {
-					log.Printf("Failed to restart child process: %v", err)
+					//log.Printf("Failed to restart child process: %v", err)
 				}
 			}()
 		}
