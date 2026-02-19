@@ -135,9 +135,9 @@ func (u ui) drawUI() {
 		lines := strings.Split(u.state.lastBuildOutput, "\n")
 		for i, line := range lines {
 			if i < 15 { // Limit number of lines to avoid overflow
-				u.drawText(2, 8+i, tcell.StyleDefault.Foreground(tcell.ColorWhite), line)
+				u.drawText(2, 3+i, tcell.StyleDefault.Foreground(tcell.ColorWhite), line)
 			} else if i == 15 {
-				u.drawText(2, 8+i, tcell.StyleDefault.Foreground(tcell.ColorWhite), "... (more errors)")
+				u.drawText(2, 3+i, tcell.StyleDefault.Foreground(tcell.ColorWhite), "... (more errors)")
 				break
 			}
 		}
