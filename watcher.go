@@ -1,23 +1,26 @@
 package main
 
 import (
-	"log"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/rs/zerolog/log"
 )
 
-func setupWatcher() {
+func runFileWatcher(ctx context.Context, something_died chan<- error, target string) {
 	// Create a new watcher
+	logger := log.Ctx(ctx)
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		log.Fatal(err)
+		something_died <- fmt.Errorf("Failed to create new watcher: %w", err)
+		return
 	}
 
-	// Start watching in a goroutine
 	go func() {
 		for {
 			select {
@@ -35,7 +38,6 @@ func setupWatcher() {
 					// Debounce multiple events by waiting a little
 					time.Sleep(100 * time.Millisecond)
 
-					log.Printf("Go file modified: %s\n", event.Name)
 					buildProject()
 				}
 
@@ -43,7 +45,7 @@ func setupWatcher() {
 				if !ok {
 					return
 				}
-				log.Println("Error:", err)
+				logger.Error().Err(err).Msg("got errors")
 			}
 		}
 	}()
@@ -67,11 +69,11 @@ func setupWatcher() {
 	})
 
 	if err != nil {
-		log.Fatal(err)
+		something_died <- fmt.Errorf("Failed to walk filepath: %w", err)
 	}
 
-	log.Println("Watcher started. Monitoring for changes...")
+	logger.Info().Msg("Watcher started. Monitoring for changes...")
+}
 
-	// Do an initial build
-	buildProject()
+func buildProject() {
 }

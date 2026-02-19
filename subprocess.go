@@ -13,20 +13,21 @@ import (
 
 // SubprocessManager handles the lifecycle of the child application process
 type SubprocessManager struct {
-	cmd            *exec.Cmd
 	buildName      string
-	mutex          sync.Mutex
-	isRunning      bool
-	compileDone    <-chan struct{} // Signal channel from compiler
-	processStarted chan struct{}   // Signal when process starts
-	processExited  chan error      // Signal when process exits
-	ctx            context.Context
 	cancel         context.CancelFunc
+	cmd            *exec.Cmd
+	compileDone    <-chan struct{} // Signal channel from compiler
+	ctx            context.Context
+	isRunning      bool
+	mutex          sync.Mutex
+	processStarted chan struct{} // Signal when process starts
+	processExited  chan error    // Signal when process exits
+	target         string
 }
 
 // NewSubprocessManager creates a new subprocess manager
-func NewSubprocessManager(compileDone <-chan struct{}) (*SubprocessManager, error) {
-	buildName, err := determineBuildOutputName()
+func NewSubprocessManager(compileDone <-chan struct{}, target string) (*SubprocessManager, error) {
+	buildName, err := determineBuildOutputName(target)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine build output name: %w", err)
 	}
@@ -35,11 +36,12 @@ func NewSubprocessManager(compileDone <-chan struct{}) (*SubprocessManager, erro
 
 	return &SubprocessManager{
 		buildName:      buildName,
+		cancel:         cancel,
 		compileDone:    compileDone,
+		ctx:            ctx,
 		processStarted: make(chan struct{}),
 		processExited:  make(chan error, 1), // Buffered to avoid blocking
-		ctx:            ctx,
-		cancel:         cancel,
+		target:         target,
 	}, nil
 }
 
