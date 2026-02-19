@@ -79,22 +79,26 @@ func (b Builder) BuildProject(ctx context.Context) debouncedFunc {
 		cmd := exec.CommandContext(ctx, "go", "build", ".")
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
+			logger.Error().Msg("no stderr")
 			b.onBuildFailure("no stderr")
 			return
 		}
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
+			logger.Error().Msg("no stdout")
 			b.onBuildFailure("no stdout")
 			return
 		}
 		err = cmd.Start()
 		if err != nil {
+			logger.Error().Msg("no start")
 			b.onBuildFailure("no start")
 			return
 		}
 		b.onBuildStart("go build .")
 		err = cmd.Wait()
 		if err != nil {
+			logger.Error().Msg("no start")
 			b.onBuildFailure("no wait")
 			return
 		}

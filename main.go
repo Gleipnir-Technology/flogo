@@ -112,11 +112,13 @@ func main() {
 			case EventBuildFailure:
 				u.state.isCompiling = false
 				u.state.lastBuildOutput = evt.Message
+				u.state.lastBuildSuccess = false
 			case EventBuildStart:
 				u.state.isCompiling = true
 			case EventBuildSuccess:
 				u.state.isCompiling = false
 				u.state.lastBuildOutput = evt.Message
+				u.state.lastBuildSuccess = true
 			}
 		case evt := <-event_q:
 			switch ev := evt.(type) {
