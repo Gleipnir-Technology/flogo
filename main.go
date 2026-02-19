@@ -92,7 +92,6 @@ func main() {
 	go startServer(bind)
 
 	// Handle keyboard input
-	//ui.Sync()
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	log.Info().Msg("entering main loop")
@@ -135,8 +134,6 @@ func main() {
 					log.Info().Str("type", t.Name()).Msg("unrecognized event")
 				}
 			}
-			log.Info().Msg("got event")
-
 		case sig := <-c:
 			switch sig {
 			case syscall.SIGINT, syscall.SIGTERM:
