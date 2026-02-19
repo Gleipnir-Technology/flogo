@@ -58,7 +58,7 @@ func main() {
 	}
 
 	// Create a context that we can cancel for signaling all goroutines to clean up
-	ctx, cancel := context.WithCancel(log.With().Str("component", "arcgis").Logger().WithContext(context.Background()))
+	ctx, cancel := context.WithCancel(log.With().Logger().WithContext(context.Background()))
 	defer cancel()
 
 	// Create a channel where all the goroutines can signal death
