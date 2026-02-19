@@ -83,19 +83,24 @@ func (w Watcher) Run(ctx context.Context) {
 	}
 }
 
-var eventTypeToSymbol = map[fsnotify.Op]string{
-	fsnotify.Create: "C",
-	fsnotify.Write:  "W",
-	fsnotify.Remove: "D",
-	fsnotify.Rename: "R",
+type opPair struct {
+	Op  fsnotify.Op
+	Sym string
+}
+
+var eventTypeToSymbol = []opPair{
+	opPair{Op: fsnotify.Create, Sym: "C"},
+	opPair{Op: fsnotify.Write, Sym: "W"},
+	opPair{Op: fsnotify.Remove, Sym: "D"},
+	opPair{Op: fsnotify.Rename, Sym: "R"},
 }
 
 func eventToString(event fsnotify.Event) string {
 	var sb strings.Builder
 
-	for k, v := range eventTypeToSymbol {
-		if event.Has(k) {
-			sb.WriteString(v)
+	for _, p := range eventTypeToSymbol {
+		if event.Has(p.Op) {
+			sb.WriteString(p.Sym)
 		} else {
 			sb.WriteString(" ")
 		}
