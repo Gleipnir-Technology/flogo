@@ -62,11 +62,13 @@ func main() {
 	defer cancel()
 
 	// Create a channel where all the goroutines can signal death
-	to_build_chan := make(chan struct{})
+
+	chan_to_build := make(chan struct{})
+	chan_builder_events := make(chan EventBuilder)
 	something_died := make(chan error)
 
 	watcher := Watcher{
-		OnBuild: to_build_chan,
+		OnBuild: chan_to_build,
 		OnDeath: something_died,
 		Target:  *target,
 	}
@@ -74,8 +76,9 @@ func main() {
 
 	builder := Builder{
 		Debounce: time.Millisecond * 300,
+		OnEvent:  chan_builder_events,
 		OnDeath:  something_died,
-		ToBuild:  to_build_chan,
+		ToBuild:  chan_to_build,
 	}
 	go builder.Run(ctx)
 
@@ -99,10 +102,22 @@ func main() {
 	event_q := u.EventQ()
 	is_running := true
 	for is_running {
+		u.Sync()
 		select {
 		case death := <-something_died:
 			fmt.Printf("Death: %v\n", death)
 			cancel()
+		case evt := <-chan_builder_events:
+			switch evt.Type {
+			case EventBuildFailure:
+				u.state.isCompiling = false
+				u.state.lastBuildOutput = evt.Message
+			case EventBuildStart:
+				u.state.isCompiling = true
+			case EventBuildSuccess:
+				u.state.isCompiling = false
+				u.state.lastBuildOutput = evt.Message
+			}
 		case evt := <-event_q:
 			switch ev := evt.(type) {
 			case *tcell.EventClipboard:

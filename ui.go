@@ -35,7 +35,7 @@ func newUI() (*ui, error) {
 		state: uiState{
 			isCompiling:      false,
 			lastBuildOutput:  "no output",
-			lastBuildSuccess: false,
+			lastBuildSuccess: true,
 		},
 	}, nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,9 +14,22 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+type EventBuilderType int
+
+const (
+	EventBuildFailure EventBuilderType = iota
+	EventBuildStart
+	EventBuildSuccess
+)
+
+type EventBuilder struct {
+	Message string
+	Type    EventBuilderType
+}
 type Builder struct {
 	Debounce time.Duration
 	OnDeath  chan<- error
+	OnEvent  chan<- EventBuilder
 	ToBuild  <-chan struct{}
 }
 
@@ -63,15 +77,52 @@ func (b Builder) BuildProject(ctx context.Context) debouncedFunc {
 	return func() {
 		logger := log.Ctx(ctx)
 		cmd := exec.CommandContext(ctx, "go", "build", ".")
-		output, err := cmd.CombinedOutput()
+		stderr, err := cmd.StderrPipe()
 		if err != nil {
-			b.onError(fmt.Errorf("go build cmd: %w", err))
+			b.onBuildFailure("no stderr")
+			return
 		}
-		outputStr := string(output)
-		logger.Info().Str("out", outputStr).Msg("build complete")
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			b.onBuildFailure("no stdout")
+			return
+		}
+		err = cmd.Start()
+		if err != nil {
+			b.onBuildFailure("no start")
+			return
+		}
+		b.onBuildStart("go build .")
+		err = cmd.Wait()
+		if err != nil {
+			b.onBuildFailure("no wait")
+			return
+		}
+		stderr_b, err := io.ReadAll(stderr)
+		stdout_b, err := io.ReadAll(stdout)
+		logger.Info().Bytes("stdout", stdout_b).Bytes("stderr", stderr_b).Msg("build complete")
+		b.onBuildSuccess(string(stdout_b))
 	}
 }
 
+func (b Builder) onBuildFailure(f string) {
+	b.OnEvent <- EventBuilder{
+		Message: f,
+		Type:    EventBuildFailure,
+	}
+}
+func (b Builder) onBuildStart(m string) {
+	b.OnEvent <- EventBuilder{
+		Message: m,
+		Type:    EventBuildStart,
+	}
+}
+func (b Builder) onBuildSuccess(m string) {
+	b.OnEvent <- EventBuilder{
+		Message: m,
+		Type:    EventBuildSuccess,
+	}
+}
 func (b Builder) onError(err error) {
 	log.Error().Err(err).Msg("HANDLE THIS")
 }
