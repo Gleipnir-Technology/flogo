@@ -68,7 +68,7 @@ func (b Builder) BuildProject(ctx context.Context) debouncedFunc {
 			b.onError(fmt.Errorf("go build cmd: %w", err))
 		}
 		outputStr := string(output)
-		logger.Info().Str("out", outputStr).Msg("build")
+		logger.Info().Str("out", outputStr).Msg("build complete")
 	}
 }
 
