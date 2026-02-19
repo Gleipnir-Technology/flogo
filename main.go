@@ -61,7 +61,11 @@ func main() {
 	// Create a channel where all the goroutines can signal death
 	something_died := make(chan error)
 
-	go runFileWatcher(ctx, something_died, *target)
+	watcher := Watcher{
+		OnDeath: something_died,
+		Target:  *target,
+	}
+	go watcher.Run(ctx)
 	// Start the UI in a goroutine
 	//go runUI(ctx)
 

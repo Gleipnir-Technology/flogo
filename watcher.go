@@ -6,23 +6,27 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/rs/zerolog/log"
 )
 
-func runFileWatcher(ctx context.Context, something_died chan<- error, target string) {
+type Watcher struct {
+	OnDeath chan<- error
+	Target  string
+}
+
+func (w Watcher) Run(ctx context.Context) {
 	// Create a new watcher
 	logger := log.Ctx(ctx)
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		something_died <- fmt.Errorf("Failed to create new watcher: %w", err)
+		w.OnDeath <- fmt.Errorf("Failed to create new watcher: %w", err)
 		return
 	}
 
 	// Recursively add directories to watch
-	err = filepath.Walk(target, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(w.Target, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -42,16 +46,16 @@ func runFileWatcher(ctx context.Context, something_died chan<- error, target str
 	})
 
 	if err != nil {
-		something_died <- fmt.Errorf("Failed to walk filepath: %w", err)
+		w.OnDeath <- fmt.Errorf("Failed to walk filepath: %w", err)
 		return
 	}
 
-	logger.Info().Str("target", target).Msg("Watcher started. Monitoring for changes...")
+	logger.Info().Str("target", w.Target).Msg("Watcher started. Monitoring for changes...")
 	for {
 		select {
 		case event, ok := <-watcher.Events:
 			if !ok {
-				something_died <- fmt.Errorf("Failed to get file watcher event")
+				w.OnDeath <- fmt.Errorf("Failed to get file watcher event")
 				return
 			}
 
@@ -63,17 +67,15 @@ func runFileWatcher(ctx context.Context, something_died chan<- error, target str
 
 				typestring := eventToString(event)
 				logger.Info().Str("name", event.Name).Str("type", typestring).Msg("notify event")
-				// Debounce multiple events by waiting a little
-				time.Sleep(100 * time.Millisecond)
 
 				buildProject(ctx)
 			}
 
 		case err, ok := <-watcher.Errors:
 			if !ok {
-				something_died <- fmt.Errorf("Failed to get file watcher errors")
+				w.OnDeath <- fmt.Errorf("Failed to get file watcher errors")
 			} else {
-				something_died <- fmt.Errorf("Got watcher error: %w", err)
+				w.OnDeath <- fmt.Errorf("Got watcher error: %w", err)
 			}
 			return
 		}
