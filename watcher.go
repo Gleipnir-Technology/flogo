@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -21,45 +20,18 @@ func runFileWatcher(ctx context.Context, something_died chan<- error, target str
 		return
 	}
 
-	go func() {
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-
-				// Check if it's a .go file and if it was modified, created, or renamed
-				if filepath.Ext(event.Name) == ".go" &&
-					(event.Op&fsnotify.Write == fsnotify.Write ||
-						event.Op&fsnotify.Create == fsnotify.Create ||
-						event.Op&fsnotify.Rename == fsnotify.Rename) {
-
-					// Debounce multiple events by waiting a little
-					time.Sleep(100 * time.Millisecond)
-
-					buildProject()
-				}
-
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				logger.Error().Err(err).Msg("got errors")
-			}
-		}
-	}()
-
 	// Recursively add directories to watch
-	err = filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(target, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// Skip hidden directories and vendor
-		if info.IsDir() && (strings.HasPrefix(info.Name(), ".") || info.Name() == "vendor") {
-			return filepath.SkipDir
-		}
+		/*
+			if info.IsDir() && (strings.HasPrefix(info.Name(), ".") || info.Name() == "vendor") {
+				return filepath.SkipDir
+			}
+		*/
 
 		// Add directories to watch
 		if info.IsDir() {
@@ -70,10 +42,43 @@ func runFileWatcher(ctx context.Context, something_died chan<- error, target str
 
 	if err != nil {
 		something_died <- fmt.Errorf("Failed to walk filepath: %w", err)
+		return
 	}
 
-	logger.Info().Msg("Watcher started. Monitoring for changes...")
+	logger.Info().Str("target", target).Msg("Watcher started. Monitoring for changes...")
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				something_died <- fmt.Errorf("Failed to get file watcher event")
+				return
+			}
+
+			// Check if it's a .go file and if it was modified, created, or renamed
+			if filepath.Ext(event.Name) == ".go" &&
+				(event.Op&fsnotify.Write == fsnotify.Write ||
+					event.Op&fsnotify.Create == fsnotify.Create ||
+					event.Op&fsnotify.Rename == fsnotify.Rename) {
+
+				logger.Info().Str("name", event.Name).Msg("notify event")
+				// Debounce multiple events by waiting a little
+				time.Sleep(100 * time.Millisecond)
+
+				buildProject(ctx)
+			}
+
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				something_died <- fmt.Errorf("Failed to get file watcher errors")
+			} else {
+				something_died <- fmt.Errorf("Got watcher error: %w", err)
+			}
+			return
+		}
+	}
 }
 
-func buildProject() {
+func buildProject(ctx context.Context) {
+	logger := log.Ctx(ctx)
+	logger.Info().Msg("fake build")
 }
