@@ -40,7 +40,6 @@ func startServer(ctx context.Context, bind string, upstream url.URL) {
 				return err
 			}
 		}
-		logger.Info().Msg("modifying response")
 
 		// Only inject JavaScript into HTML responses
 		contentType := resp.Header.Get("Content-Type")

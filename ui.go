@@ -113,7 +113,7 @@ func (u ui) drawUI() {
 	u.screen.Clear()
 
 	// Draw title
-	u.drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorWhite).Bold(true), fmt.Sprintf("FLOGO - target %s", u.target))
+	u.drawTitle()
 	// Draw upstream info
 	//u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorYellow), fmt.Sprintf("Upstream: %s", upstreamURL.String()))
 
@@ -123,6 +123,8 @@ func (u ui) drawUI() {
 		u.drawCompilation()
 	} else if u.state.isRunning {
 		u.drawRunning()
+	} else {
+		u.drawUnknown()
 	}
 
 	u.screen.Show()
@@ -144,23 +146,41 @@ func (u ui) drawBuildFailure() {
 }
 
 func (u ui) drawCompilation() {
-	u.drawStatus("Compiling...", tcell.StyleDefault.Foreground(tcell.ColorYellow))
 }
 func (u ui) drawRunning() {
-	u.drawStatus("Running.", tcell.StyleDefault.Foreground(tcell.ColorGreen))
 	if u.state.lastRunStderr != "" {
-		u.drawText(0, 2, tcell.StyleDefault.Foreground(tcell.ColorYellow), "stderr:")
-		u.drawText(0, 3, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStderr)
+		u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorYellow), "stderr:")
+		u.drawText(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStderr)
 	} else if u.state.lastRunStdout != "" {
-		u.drawText(0, 2, tcell.StyleDefault.Foreground(tcell.ColorGreen), "stderr:")
-		u.drawText(0, 3, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStdout)
+		u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorGreen), "stderr:")
+		u.drawText(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStdout)
 	}
 }
 func (u ui) drawStatus(status string, style tcell.Style) {
 	u.drawText(0, 1, style.Bold(true), fmt.Sprintf("Status: %s", status))
 }
 func (u ui) drawText(x, y int, style tcell.Style, text string) {
+	offset := 0
 	for i, r := range text {
-		u.screen.SetContent(x+i, y, r, nil, style)
+		if r == '\n' {
+			offset = offset + 1
+		}
+		u.screen.SetContent(x+i, y+offset, r, nil, style)
 	}
+}
+func (u ui) drawTitle() {
+	if u.state.isCompiling {
+		u.drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorYellow).Bold(true), "Compiling")
+	} else {
+		u.drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorGreen).Bold(true), "Idle")
+	}
+
+	if u.state.isRunning {
+		u.drawText(10, 0, tcell.StyleDefault.Foreground(tcell.ColorYellow).Bold(true), "Running")
+	} else {
+		u.drawText(10, 0, tcell.StyleDefault.Foreground(tcell.ColorRed).Bold(true), "Dead")
+	}
+}
+func (u ui) drawUnknown() {
+	u.drawStatus("Unknown.", tcell.StyleDefault.Foreground(tcell.ColorRed))
 }

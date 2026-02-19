@@ -35,7 +35,23 @@ func (r Runner) Run(ctx context.Context) {
 		logger.Warn().Err(err).Msg("failed to determine build output name")
 		return
 	}
+	logger.Info().Str("build", build_name).Msg("Build output")
+	go r.Restart(ctx, build_name)
 	// Avoid infinite recursion when we self-host
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info().Msg("closing runner")
+			return
+		case <-r.DoRestart:
+			go r.Restart(ctx, build_name)
+			logger.Debug().Msg("fake restart")
+		}
+	}
+}
+
+func (r Runner) Restart(ctx context.Context, build_name string) {
+	logger := log.Ctx(ctx)
 	if build_name == "flogo" {
 		logger.Info().Msg("Refusing to infinitely recurse on flogo")
 		r.OnEvent <- EventRunner{
@@ -46,6 +62,7 @@ func (r Runner) Run(ctx context.Context) {
 			Message: "no recursing!",
 			Type:    EventRunnerStdout,
 		}
+		return
 	}
 	// Create the command
 	cmd := exec.Command(build_name)

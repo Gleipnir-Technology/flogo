@@ -115,32 +115,43 @@ func main() {
 		u.Sync()
 		select {
 		case death := <-something_died:
-			fmt.Printf("Death: %v\n", death)
-			cancel()
+			log.Error().Err(death).Msg("something died")
+			is_running = false
 		case evt := <-chan_builder_events:
 			switch evt.Type {
 			case EventBuildFailure:
+				log.Debug().Msg("build failure")
 				u.state.isCompiling = false
 				u.state.lastBuildOutput = evt.Message
 				u.state.lastBuildSuccess = false
 			case EventBuildStart:
+				log.Debug().Msg("build start")
 				u.state.isCompiling = true
 			case EventBuildSuccess:
+				log.Debug().Msg("build success")
 				u.state.isCompiling = false
 				u.state.lastBuildOutput = evt.Message
 				u.state.lastBuildSuccess = true
 				chan_runner_restart <- struct{}{}
+			default:
+				log.Debug().Msg("build unknown")
 			}
 		case evt := <-chan_runner_events:
 			switch evt.Type {
 			case EventRunnerStart:
+				log.Debug().Msg("runner start")
 				u.state.isRunning = true
 			case EventRunnerStop:
+				log.Debug().Msg("runner stop")
 				u.state.isRunning = false
 			case EventRunnerStdout:
+				log.Debug().Msg("runner stdout")
 				u.state.lastRunStdout = evt.Message
 			case EventRunnerStderr:
+				log.Debug().Msg("runner stderr")
 				u.state.lastRunStderr = evt.Message
+			default:
+				log.Debug().Msg("runner unknown")
 			}
 		case evt := <-event_q:
 			switch ev := evt.(type) {
@@ -174,10 +185,13 @@ func main() {
 				}
 			}
 		case sig := <-c:
+			log.Debug().Msg("signal")
 			switch sig {
 			case syscall.SIGINT, syscall.SIGTERM:
+				log.Debug().Msg("sigint/sigterm")
 				is_running = false
 			case syscall.SIGHUP:
+				log.Debug().Msg("sighup")
 				reload()
 			}
 		}

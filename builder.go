@@ -78,11 +78,13 @@ func (b Builder) BuildProject(ctx context.Context) debouncedFunc {
 			b.onBuildFailure(fmt.Sprintf("Failed to read stderr: %+v", err))
 			return
 		}
+		logger.Info().Msg("read stderr")
 		stdout_b, err := io.ReadAll(stdout)
 		if err != nil {
 			b.onBuildFailure(fmt.Sprintf("Failed to read stdout: %+v", err))
 			return
 		}
+		logger.Info().Msg("read stdout")
 		err = cmd.Wait()
 		if err != nil {
 			b.onBuildFailure(string(stderr_b))
