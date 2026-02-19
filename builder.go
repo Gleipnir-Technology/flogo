@@ -30,6 +30,7 @@ type Builder struct {
 	Debounce time.Duration
 	OnDeath  chan<- error
 	OnEvent  chan<- EventBuilder
+	Target   string
 	ToBuild  <-chan struct{}
 }
 
@@ -77,6 +78,7 @@ func (b Builder) BuildProject(ctx context.Context) debouncedFunc {
 	return func() {
 		logger := log.Ctx(ctx)
 		cmd := exec.CommandContext(ctx, "go", "build", ".")
+		cmd.Dir = b.Target
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
 			logger.Error().Msg("no stderr")
@@ -92,7 +94,7 @@ func (b Builder) BuildProject(ctx context.Context) debouncedFunc {
 		err = cmd.Start()
 		if err != nil {
 			logger.Error().Msg("no start")
-			b.onBuildFailure("no start")
+			b.onBuildFailure(fmt.Sprintf("failed to start 'go build .' in %s: %+v", b.Target, err))
 			return
 		}
 		b.onBuildStart("go build .")

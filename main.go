@@ -78,6 +78,7 @@ func main() {
 		Debounce: time.Millisecond * 300,
 		OnEvent:  chan_builder_events,
 		OnDeath:  something_died,
+		Target:   *target,
 		ToBuild:  chan_to_build,
 	}
 	go builder.Run(ctx)
