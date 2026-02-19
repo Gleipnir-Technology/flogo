@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -48,31 +47,6 @@ func (b Builder) Run(ctx context.Context) {
 	}
 }
 
-// CompilerManager handles building the project and notifying the subprocess manager
-type CompilerManager struct {
-	mutex            sync.Mutex
-	isCompiling      bool
-	lastBuildOutput  string
-	lastBuildSuccess bool
-	lastBuildTime    time.Time
-	compileDone      chan struct{}
-	subprocessMgr    *SubprocessManager
-	ctx              context.Context
-	cancel           context.CancelFunc
-}
-
-// NewCompilerManager creates a new compiler manager
-func NewCompilerManager() *CompilerManager {
-	ctx, cancel := context.WithCancel(context.Background())
-	compileDone := make(chan struct{})
-
-	return &CompilerManager{
-		compileDone: compileDone,
-		ctx:         ctx,
-		cancel:      cancel,
-	}
-}
-
 // BuildProject builds the Go project
 func (b Builder) BuildProject(ctx context.Context) debouncedFunc {
 	return func() {
@@ -97,6 +71,7 @@ func (b Builder) BuildProject(ctx context.Context) debouncedFunc {
 			b.onBuildFailure(fmt.Sprintf("failed to start 'go build .' in %s: %+v", b.Target, err))
 			return
 		}
+		logger.Info().Msg("Build start")
 		b.onBuildStart("go build .")
 		stderr_b, err := io.ReadAll(stderr)
 		if err != nil {

@@ -65,6 +65,8 @@ func main() {
 
 	chan_to_build := make(chan struct{})
 	chan_builder_events := make(chan EventBuilder)
+	chan_runner_restart := make(chan struct{})
+	chan_runner_events := make(chan EventRunner)
 	something_died := make(chan error)
 
 	watcher := Watcher{
@@ -82,6 +84,13 @@ func main() {
 		ToBuild:  chan_to_build,
 	}
 	go builder.Run(ctx)
+
+	runner := Runner{
+		DoRestart: chan_runner_restart,
+		OnEvent:   chan_runner_events,
+		Target:    *target,
+	}
+	go runner.Run(ctx)
 
 	// Start the UI in a goroutine
 
@@ -103,7 +112,6 @@ func main() {
 	event_q := u.EventQ()
 	is_running := true
 	for is_running {
-		u.Sync()
 		select {
 		case death := <-something_died:
 			fmt.Printf("Death: %v\n", death)
@@ -120,6 +128,18 @@ func main() {
 				u.state.isCompiling = false
 				u.state.lastBuildOutput = evt.Message
 				u.state.lastBuildSuccess = true
+				chan_runner_restart <- struct{}{}
+			}
+		case evt := <-chan_runner_events:
+			switch evt.Type {
+			case EventRunnerStart:
+				u.state.isRunning = true
+			case EventRunnerStop:
+				u.state.isRunning = false
+			case EventRunnerStdout:
+				u.state.lastRunStdout = evt.Message
+			case EventRunnerStderr:
+				u.state.lastRunStderr = evt.Message
 			}
 		case evt := <-event_q:
 			switch ev := evt.(type) {
@@ -160,6 +180,7 @@ func main() {
 				reload()
 			}
 		}
+		u.Sync()
 	}
 	cancel()
 	u.Fini()

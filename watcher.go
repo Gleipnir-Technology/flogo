@@ -67,7 +67,7 @@ func (w Watcher) Run(ctx context.Context) {
 				//event.Op&fsnotify.Rename == fsnotify.Rename) {
 
 				typestring := eventToString(event)
-				logger.Info().Str("name", event.Name).Str("type", typestring).Msg("notify event")
+				logger.Debug().Str("name", event.Name).Str("type", typestring).Msg("notify event")
 
 				w.OnBuild <- struct{}{}
 			}

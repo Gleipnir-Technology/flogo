@@ -18,8 +18,11 @@ type ui struct {
 }
 type uiState struct {
 	isCompiling      bool
+	isRunning        bool
 	lastBuildOutput  string
 	lastBuildSuccess bool
+	lastRunStdout    string
+	lastRunStderr    string
 }
 
 func newUI(target string) (*ui, error) {
@@ -35,6 +38,7 @@ func newUI(target string) (*ui, error) {
 		screen: screen,
 		state: uiState{
 			isCompiling:      false,
+			isRunning:        false,
 			lastBuildOutput:  "no output",
 			lastBuildSuccess: true,
 		},
@@ -109,43 +113,52 @@ func (u ui) drawUI() {
 	u.screen.Clear()
 
 	// Draw title
-	u.drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorWhite).Bold(true), fmt.Sprintf("FLOGO - %s", u.target))
+	u.drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorWhite).Bold(true), fmt.Sprintf("FLOGO - target %s", u.target))
 	// Draw upstream info
 	//u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorYellow), fmt.Sprintf("Upstream: %s", upstreamURL.String()))
 
-	// Draw status
-	statusStyle := tcell.StyleDefault.Foreground(tcell.ColorGreen)
-	statusText := "Idle"
-
-	if u.state.isCompiling {
-		statusStyle = tcell.StyleDefault.Foreground(tcell.ColorYellow)
-		statusText = "Compiling..."
-	} else if !u.state.lastBuildSuccess && u.state.lastBuildOutput != "" {
-		statusStyle = tcell.StyleDefault.Foreground(tcell.ColorRed)
-		statusText = "Build Failed"
-	}
-
-	u.drawText(0, 1, statusStyle.Bold(true), fmt.Sprintf("Status: %s", statusText))
-
-	// Draw last build output if there was an error
 	if !u.state.lastBuildSuccess && u.state.lastBuildOutput != "" {
-		u.drawText(0, 2, tcell.StyleDefault.Foreground(tcell.ColorRed).Bold(true), "Build Errors:")
-
-		// Split output into lines and display them
-		lines := strings.Split(u.state.lastBuildOutput, "\n")
-		for i, line := range lines {
-			if i < 15 { // Limit number of lines to avoid overflow
-				u.drawText(2, 3+i, tcell.StyleDefault.Foreground(tcell.ColorWhite), line)
-			} else if i == 15 {
-				u.drawText(2, 3+i, tcell.StyleDefault.Foreground(tcell.ColorWhite), "... (more errors)")
-				break
-			}
-		}
+		u.drawBuildFailure()
+	} else if u.state.isCompiling {
+		u.drawCompilation()
+	} else if u.state.isRunning {
+		u.drawRunning()
 	}
 
 	u.screen.Show()
 }
 
+func (u ui) drawBuildFailure() {
+	u.drawStatus("Build Failed. Errors:", tcell.StyleDefault.Foreground(tcell.ColorRed))
+
+	// Split output into lines and display them
+	lines := strings.Split(u.state.lastBuildOutput, "\n")
+	for i, line := range lines {
+		if i < 15 { // Limit number of lines to avoid overflow
+			u.drawText(1, 3+i, tcell.StyleDefault.Foreground(tcell.ColorWhite), line)
+		} else if i == 15 {
+			u.drawText(1, 3+i, tcell.StyleDefault.Foreground(tcell.ColorWhite), "... (more errors)")
+			break
+		}
+	}
+}
+
+func (u ui) drawCompilation() {
+	u.drawStatus("Compiling...", tcell.StyleDefault.Foreground(tcell.ColorYellow))
+}
+func (u ui) drawRunning() {
+	u.drawStatus("Running.", tcell.StyleDefault.Foreground(tcell.ColorGreen))
+	if u.state.lastRunStderr != "" {
+		u.drawText(0, 2, tcell.StyleDefault.Foreground(tcell.ColorYellow), "stderr:")
+		u.drawText(0, 3, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStderr)
+	} else if u.state.lastRunStdout != "" {
+		u.drawText(0, 2, tcell.StyleDefault.Foreground(tcell.ColorGreen), "stderr:")
+		u.drawText(0, 3, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStdout)
+	}
+}
+func (u ui) drawStatus(status string, style tcell.Style) {
+	u.drawText(0, 1, style.Bold(true), fmt.Sprintf("Status: %s", status))
+}
 func (u ui) drawText(x, y int, style tcell.Style, text string) {
 	for i, r := range text {
 		u.screen.SetContent(x+i, y, r, nil, style)
