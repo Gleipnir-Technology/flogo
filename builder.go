@@ -15,13 +15,21 @@ import (
 
 type Builder struct {
 	ToBuild <-chan struct{}
+	OnDeath chan<- error
 }
 
 func (b Builder) Run(ctx context.Context) {
-	logger := log.Ctx(ctx)
-	select {
-	case _ = <-b.ToBuild:
-		logger.Info().Msg("fake build")
+	//logger := log.Ctx(ctx)
+	for {
+		select {
+		case _ = <-b.ToBuild:
+			err := b.BuildProject(ctx)
+			if err != nil {
+				b.OnDeath <- fmt.Errorf("Builder death: %w", err)
+				return
+			}
+
+		}
 	}
 }
 
@@ -50,90 +58,17 @@ func NewCompilerManager() *CompilerManager {
 	}
 }
 
-// SetSubprocessManager sets the subprocess manager reference
-func (cm *CompilerManager) SetSubprocessManager(subprocessMgr *SubprocessManager) {
-	cm.subprocessMgr = subprocessMgr
-}
-
-// GetCompileDoneChannel returns the channel that signals when compilation is complete
-func (cm *CompilerManager) GetCompileDoneChannel() <-chan struct{} {
-	return cm.compileDone
-}
-
 // BuildProject builds the Go project
-func (cm *CompilerManager) BuildProject() {
-	cm.mutex.Lock()
-	// Don't start a new build if one is already in progress
-	if cm.isCompiling {
-		cm.mutex.Unlock()
-		return
-	}
-	cm.isCompiling = true
-	cm.mutex.Unlock()
-
-	//log.Println("Building project...")
-
-	cmd := exec.CommandContext(cm.ctx, "go", "build", ".")
+func (b Builder) BuildProject(ctx context.Context) error {
+	logger := log.Ctx(ctx)
+	cmd := exec.CommandContext(ctx, "go", "build", ".")
 	output, err := cmd.CombinedOutput()
-	outputStr := string(output)
-
-	cm.mutex.Lock()
-	cm.isCompiling = false
-	cm.lastBuildOutput = outputStr
-	cm.lastBuildSuccess = (err == nil)
-	cm.lastBuildTime = time.Now()
-
-	// Create a new completion channel for future builds
-	close(cm.compileDone)
-	cm.compileDone = make(chan struct{})
-
-	buildSuccess := cm.lastBuildSuccess
-	cm.mutex.Unlock()
-
 	if err != nil {
-		//log.Println("Build failed:")
-		//log.Println(outputStr)
-	} else {
-		//log.Println("Build succeeded!")
-
-		// If the subprocess manager exists and build succeeded, restart the process
-		if cm.subprocessMgr != nil && buildSuccess {
-			go func() {
-				// Give the filesystem a moment to finalize the file writes
-				time.Sleep(100 * time.Millisecond)
-
-				//log.Println("Restarting child process with new build...")
-				err := cm.subprocessMgr.Restart()
-				if err != nil {
-					//log.Printf("Failed to restart child process: %v", err)
-				}
-			}()
-		}
+		return fmt.Errorf("go build cmd: %w", err)
 	}
-}
-
-// TriggerBuild triggers a new build asynchronously
-func (cm *CompilerManager) TriggerBuild() {
-	go cm.BuildProject()
-}
-
-// IsCompiling returns whether a compilation is in progress
-func (cm *CompilerManager) IsCompiling() bool {
-	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
-	return cm.isCompiling
-}
-
-// GetLastBuildInfo returns information about the last build
-func (cm *CompilerManager) GetLastBuildInfo() (string, bool, time.Time) {
-	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
-	return cm.lastBuildOutput, cm.lastBuildSuccess, cm.lastBuildTime
-}
-
-// Cleanup performs cleanup operations
-func (cm *CompilerManager) Cleanup() {
-	cm.cancel()
+	outputStr := string(output)
+	logger.Info().Str("out", outputStr).Msg("build")
+	return nil
 }
 
 // determineBuildOutputName determines the build output name from the go.mod file

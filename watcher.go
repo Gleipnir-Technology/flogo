@@ -69,7 +69,7 @@ func (w Watcher) Run(ctx context.Context) {
 				typestring := eventToString(event)
 				logger.Info().Str("name", event.Name).Str("type", typestring).Msg("notify event")
 
-				emitBuildSignal(ctx)
+				w.OnBuild <- struct{}{}
 			}
 
 		case err, ok := <-watcher.Errors:
@@ -81,11 +81,6 @@ func (w Watcher) Run(ctx context.Context) {
 			return
 		}
 	}
-}
-
-func emitBuildSignal(ctx context.Context) {
-	logger := log.Ctx(ctx)
-	logger.Info().Msg("fake build")
 }
 
 var eventTypeToSymbol = map[fsnotify.Op]string{

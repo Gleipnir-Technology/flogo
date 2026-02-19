@@ -59,13 +59,21 @@ func main() {
 	defer cancel()
 
 	// Create a channel where all the goroutines can signal death
+	to_build_chan := make(chan struct{})
 	something_died := make(chan error)
 
 	watcher := Watcher{
+		OnBuild: to_build_chan,
 		OnDeath: something_died,
 		Target:  *target,
 	}
 	go watcher.Run(ctx)
+
+	builder := Builder{
+		ToBuild: to_build_chan,
+	}
+	go builder.Run(ctx)
+
 	// Start the UI in a goroutine
 	//go runUI(ctx)
 
