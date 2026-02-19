@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -60,7 +61,8 @@ func runFileWatcher(ctx context.Context, something_died chan<- error, target str
 					event.Op&fsnotify.Create == fsnotify.Create ||
 					event.Op&fsnotify.Rename == fsnotify.Rename) {
 
-				logger.Info().Str("name", event.Name).Msg("notify event")
+				typestring := eventToString(event)
+				logger.Info().Str("name", event.Name).Str("type", typestring).Msg("notify event")
 				// Debounce multiple events by waiting a little
 				time.Sleep(100 * time.Millisecond)
 
@@ -81,4 +83,24 @@ func runFileWatcher(ctx context.Context, something_died chan<- error, target str
 func buildProject(ctx context.Context) {
 	logger := log.Ctx(ctx)
 	logger.Info().Msg("fake build")
+}
+
+var eventTypeToSymbol = map[fsnotify.Op]string{
+	fsnotify.Create: "C",
+	fsnotify.Write:  "W",
+	fsnotify.Remove: "D",
+	fsnotify.Rename: "R",
+}
+
+func eventToString(event fsnotify.Event) string {
+	var sb strings.Builder
+
+	for k, v := range eventTypeToSymbol {
+		if event.Has(k) {
+			sb.WriteString(v)
+		} else {
+			sb.WriteString(" ")
+		}
+	}
+	return sb.String()
 }
