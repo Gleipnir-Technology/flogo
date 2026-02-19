@@ -48,7 +48,7 @@ func main() {
 	// Get the upstream URL from environment variable
 	upstream := os.Getenv("FLOGO_UPSTREAM")
 	if upstream == "" {
-		upstream = "http://localhost:8080" // Default if not specified
+		upstream = "http://localhost:9001" // Default if not specified
 	}
 
 	upstreamURL, err = url.Parse(upstream)
@@ -93,7 +93,7 @@ func main() {
 	defer u.Fini()
 
 	// Start the web server
-	go startServer(bind)
+	go startServer(ctx, bind, *upstreamURL)
 
 	// Handle keyboard input
 	c := make(chan os.Signal, 1)
