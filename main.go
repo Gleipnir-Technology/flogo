@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -25,7 +26,6 @@ func main() {
 	var target = flag.String("target", ".", "The directory containing the go project to build")
 	flag.Parse()
 
-	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	file, err := os.OpenFile(
 		"flogo.log",
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
@@ -36,8 +36,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer file.Close()
-	logger := zerolog.New(file).With().Timestamp().Logger()
-	log.Logger = logger
+	setupLogging(file)
 
 	bind := os.Getenv("FLOGO_BIND")
 	if bind == "" {
@@ -101,4 +100,25 @@ func main() {
 	}
 }
 func reload() {
+}
+func setupLogging(file *os.File) {
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	writer := zerolog.NewConsoleWriter()
+	writer.Out = file
+	writer.FormatLevel = func(i interface{}) string { return strings.ToUpper(fmt.Sprintf("%-6s", i)) }
+	writer.FormatFieldName = func(i interface{}) string { return fmt.Sprintf("%s:", i) }
+	writer.FormatPartValueByName = func(i interface{}, s string) string {
+		var ret string
+		switch s {
+		case "one":
+			ret = strings.ToUpper(fmt.Sprintf("%s", i))
+		case "two":
+			ret = strings.ToLower(fmt.Sprintf("%s", i))
+		case "three":
+			ret = strings.ToLower(fmt.Sprintf("(%s)", i))
+		}
+		return ret
+	}
+	log.Logger = zerolog.New(writer)
 }
