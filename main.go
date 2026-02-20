@@ -95,7 +95,7 @@ func main() {
 
 	// Start the UI in a goroutine
 
-	u, err := newUI(*target)
+	u, err := newUI(*target, *upstreamURL)
 	if err != nil {
 		fmt.Printf("Failed to create UI: %+v\n", err)
 		os.Exit(3)

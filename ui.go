@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	//"time"
 
@@ -12,9 +13,10 @@ import (
 )
 
 type ui struct {
-	screen tcell.Screen
-	state  uiState
-	target string
+	screen   tcell.Screen
+	state    uiState
+	target   string
+	upstream url.URL
 }
 type runnerStatus int
 
@@ -34,7 +36,7 @@ type uiState struct {
 	runnerStatus     runnerStatus
 }
 
-func newUI(target string) (*ui, error) {
+func newUI(target string, upstream url.URL) (*ui, error) {
 	screen, err := tcell.NewScreen()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create screen: %w", err)
@@ -51,7 +53,8 @@ func newUI(target string) (*ui, error) {
 			lastBuildSuccess: true,
 			runnerStatus:     runnerStatusWaiting,
 		},
-		target: target,
+		target:   target,
+		upstream: upstream,
 	}, nil
 }
 func (u ui) EventQ() chan tcell.Event {
@@ -202,4 +205,5 @@ func (u ui) drawTitle() {
 	default:
 		u.drawText(10, 0, tcell.StyleDefault.Foreground(tcell.ColorPurple).Bold(true), "Unknown")
 	}
+	u.drawText(20, 0, tcell.StyleDefault.Foreground(tcell.ColorGreen).Bold(true), u.upstream.String())
 }
