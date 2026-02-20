@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"reflect"
-	"strings"
+	//"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -84,6 +84,7 @@ func main() {
 		ToBuild:  chan_to_build,
 	}
 	go builder.Run(ctx)
+	chan_to_build <- struct{}{}
 
 	runner := Runner{
 		DoRestart: chan_runner_restart,
@@ -120,15 +121,12 @@ func main() {
 		case evt := <-chan_builder_events:
 			switch evt.Type {
 			case EventBuildFailure:
-				log.Debug().Msg("build failure")
 				u.state.isCompiling = false
 				u.state.lastBuildOutput = evt.Message
 				u.state.lastBuildSuccess = false
 			case EventBuildStart:
-				log.Debug().Msg("build start")
 				u.state.isCompiling = true
 			case EventBuildSuccess:
-				log.Debug().Msg("build success")
 				u.state.isCompiling = false
 				u.state.lastBuildOutput = evt.Message
 				u.state.lastBuildSuccess = true
@@ -139,16 +137,14 @@ func main() {
 		case evt := <-chan_runner_events:
 			switch evt.Type {
 			case EventRunnerStart:
-				log.Debug().Msg("runner start")
 				u.state.isRunning = true
+				u.state.lastRunStdout = ""
+				u.state.lastRunStderr = ""
 			case EventRunnerStop:
-				log.Debug().Msg("runner stop")
 				u.state.isRunning = false
 			case EventRunnerStdout:
-				log.Debug().Msg("runner stdout")
 				u.state.lastRunStdout = evt.Message
 			case EventRunnerStderr:
-				log.Debug().Msg("runner stderr")
 				u.state.lastRunStderr = evt.Message
 			default:
 				log.Debug().Msg("runner unknown")
@@ -206,19 +202,21 @@ func setupLogging(file *os.File) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	writer := zerolog.NewConsoleWriter()
 	writer.Out = file
-	writer.FormatLevel = func(i interface{}) string { return strings.ToUpper(fmt.Sprintf("%-6s", i)) }
-	writer.FormatFieldName = func(i interface{}) string { return fmt.Sprintf("%s:", i) }
-	writer.FormatPartValueByName = func(i interface{}, s string) string {
-		var ret string
-		switch s {
-		case "one":
-			ret = strings.ToUpper(fmt.Sprintf("%s", i))
-		case "two":
-			ret = strings.ToLower(fmt.Sprintf("%s", i))
-		case "three":
-			ret = strings.ToLower(fmt.Sprintf("(%s)", i))
+	/*
+		writer.FormatLevel = func(i interface{}) string { return strings.ToUpper(fmt.Sprintf("%-6s", i)) }
+		writer.FormatFieldName = func(i interface{}) string { return fmt.Sprintf("%s:", i) }
+		writer.FormatPartValueByName = func(i interface{}, s string) string {
+			var ret string
+			switch s {
+			case "one":
+				ret = strings.ToUpper(fmt.Sprintf("%s", i))
+			case "two":
+				ret = strings.ToLower(fmt.Sprintf("%s", i))
+			case "three":
+				ret = strings.ToLower(fmt.Sprintf("(%s)", i))
+			}
+			return ret
 		}
-		return ret
-	}
+	*/
 	log.Logger = zerolog.New(writer)
 }

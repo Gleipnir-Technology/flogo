@@ -150,22 +150,25 @@ func (u ui) drawCompilation() {
 func (u ui) drawRunning() {
 	if u.state.lastRunStderr != "" {
 		u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorYellow), "stderr:")
-		u.drawText(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStderr)
+		u.drawTextMultiline(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStderr)
 	} else if u.state.lastRunStdout != "" {
-		u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorGreen), "stderr:")
-		u.drawText(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStdout)
+		u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorGreen), "stdout:")
+		u.drawTextMultiline(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStdout)
 	}
 }
 func (u ui) drawStatus(status string, style tcell.Style) {
 	u.drawText(0, 1, style.Bold(true), fmt.Sprintf("Status: %s", status))
 }
 func (u ui) drawText(x, y int, style tcell.Style, text string) {
-	offset := 0
 	for i, r := range text {
-		if r == '\n' {
-			offset = offset + 1
-		}
-		u.screen.SetContent(x+i, y+offset, r, nil, style)
+		u.screen.SetContent(x+i, y, r, nil, style)
+	}
+}
+func (u ui) drawTextMultiline(x, y int, style tcell.Style, text string) {
+	// Split output into lines and display them
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		u.drawText(x, y+i, style, line)
 	}
 }
 func (u ui) drawTitle() {

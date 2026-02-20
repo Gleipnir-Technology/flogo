@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"context"
-	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 )
@@ -26,17 +28,18 @@ type Runner struct {
 	DoRestart <-chan struct{}
 	OnEvent   chan<- EventRunner
 	Target    string
+	stdout    strings.Builder
+	stderr    strings.Builder
 }
 
-func (r Runner) Run(ctx context.Context) {
+func (r *Runner) Run(ctx context.Context) {
 	logger := log.Ctx(ctx)
-	build_name, err := determineBuildOutputName(r.Target)
+	build_output, err := determineBuildOutputAbs(r.Target)
 	if err != nil {
 		logger.Warn().Err(err).Msg("failed to determine build output name")
 		return
 	}
-	logger.Info().Str("build", build_name).Msg("Build output")
-	go r.Restart(ctx, build_name)
+	logger.Info().Str("build", build_output).Msg("Build output")
 	// Avoid infinite recursion when we self-host
 	for {
 		select {
@@ -44,15 +47,18 @@ func (r Runner) Run(ctx context.Context) {
 			logger.Info().Msg("closing runner")
 			return
 		case <-r.DoRestart:
-			go r.Restart(ctx, build_name)
-			logger.Debug().Msg("fake restart")
+			go r.Restart(ctx, build_output)
 		}
 	}
 }
 
-func (r Runner) Restart(ctx context.Context, build_name string) {
+func (r *Runner) Restart(ctx context.Context, build_output string) {
 	logger := log.Ctx(ctx)
-	if build_name == "flogo" {
+	logger.Debug().Msg("runner restart")
+	r.stdout.Reset()
+	r.stderr.Reset()
+	base := filepath.Base(build_output)
+	if base == "flogo" {
 		logger.Info().Msg("Refusing to infinitely recurse on flogo")
 		r.OnEvent <- EventRunner{
 			Message: "",
@@ -64,8 +70,16 @@ func (r Runner) Restart(ctx context.Context, build_name string) {
 		}
 		return
 	}
+	if _, err := os.Stat(build_output); os.IsNotExist(err) {
+		logger.Info().Str("build_output", build_output).Msg("Build output doesn't exist")
+		r.OnEvent <- EventRunner{
+			Message: "",
+			Type:    EventRunnerStop,
+		}
+		return
+	}
 	// Create the command
-	cmd := exec.Command(build_name)
+	cmd := exec.Command(build_output)
 	cmd.Dir = r.Target
 
 	// Get a pipe for stdout
@@ -84,15 +98,20 @@ func (r Runner) Restart(ctx context.Context, build_name string) {
 
 	// Start the command (non-blocking)
 	if err := cmd.Start(); err != nil {
-		logger.Error().Err(err).Msg("Failed to start")
+		logger.Error().Err(err).Str("build_output", build_output).Msg("Failed to start")
 		return
+	}
+	r.OnEvent <- EventRunner{
+		Message: "",
+		Type:    EventRunnerStart,
 	}
 
 	// Read stdout line by line
 	scanner := bufio.NewScanner(stdout)
 	go func() {
 		for scanner.Scan() {
-			fmt.Println("stdout:", scanner.Text())
+			text := scanner.Text()
+			r.onStdout(text)
 		}
 	}()
 
@@ -100,13 +119,36 @@ func (r Runner) Restart(ctx context.Context, build_name string) {
 	stderrScanner := bufio.NewScanner(stderr)
 	go func() {
 		for stderrScanner.Scan() {
-			fmt.Println("stderr:", stderrScanner.Text())
+			text := stderrScanner.Text()
+			r.onStderr(text)
 		}
 	}()
 
 	// Wait for the command to finish
-	if err := cmd.Wait(); err != nil {
-		logger.Error().Err(err).Msg("Failed to start")
-		return
+	if e := cmd.Wait(); e != nil {
+		r.OnEvent <- EventRunner{
+			Message: e.Error(),
+			Type:    EventRunnerStop,
+		}
+	}
+	r.OnEvent <- EventRunner{
+		Message: "ok",
+		Type:    EventRunnerStop,
+	}
+	log.Debug().Msg("exiting runner restart")
+}
+
+func (r *Runner) onStdout(s string) {
+	r.stdout.WriteString(s + "\n")
+	r.OnEvent <- EventRunner{
+		Message: r.stdout.String(),
+		Type:    EventRunnerStdout,
+	}
+}
+func (r *Runner) onStderr(s string) {
+	r.stderr.WriteString(s + "\n")
+	r.OnEvent <- EventRunner{
+		Message: r.stderr.String(),
+		Type:    EventRunnerStderr,
 	}
 }

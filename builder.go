@@ -118,22 +118,33 @@ func (b Builder) onError(err error) {
 }
 
 // determineBuildOutputName determines the build output name from the go.mod file
-func determineBuildOutputName(target string) (string, error) {
+func determineBuildOutputAbs(target string) (string, error) {
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		return "", fmt.Errorf("Failed to get abs path: %w", err)
+	}
 	// Check if we're in a Go module
-	go_mod_path := filepath.Join(target, "go.mod")
+	go_mod_path := filepath.Join(".", "go.mod")
 	if _, err := os.Stat(go_mod_path); os.IsNotExist(err) {
 		return "", fmt.Errorf("no go.mod file found, not in a Go module")
 	}
 
 	// Use go list to get the module name
-	cmd := exec.Command("go", "list", "-m")
-	cmd.Dir = target
+	cmd := exec.Command("go", "list", "-f", "{{.Name}}", "./"+target)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("Failed to run 'go list -m': %w", err)
 	}
-	// Extract the last part of the module path which is typically the project name
-	modulePath := strings.TrimSpace(string(output))
-	parts := strings.Split(modulePath, "/")
-	return parts[len(parts)-1], nil
+
+	// Extract the last part of the module path
+	module := strings.TrimSpace(string(output))
+	if module == "main" {
+		// For the special name "main" we use the parent directory name
+		// since that's what 'go build' will do
+		base := filepath.Base(abs)
+		// We then re-add that base to get the full abs path to the build output
+		full := filepath.Join(abs, base)
+		return full, nil
+	}
+	return "", fmt.Errorf("Not sure what to do with '%s': this isn't implemented yet", module)
 }
