@@ -128,10 +128,16 @@ func determineBuildOutputAbs(target string) (string, error) {
 	}
 
 	// Use go list to get the module name
-	cmd := exec.Command("go", "list", "-f", "{{.Name}}", "./"+target)
+	args := []string{"list", "-f", "{{.Name}}", "./" + target}
+	cmd := exec.Command("go", args...)
 	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("Failed to run 'go list -m': %w", err)
+		full_cmd := "go " + strings.Join(args, " ")
+		if ex, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("Failed to run '%s': %s, %w", full_cmd, string(ex.Stderr), ex)
+		} else {
+			return "", fmt.Errorf("Failed to run '%s': %w", full_cmd, err)
+		}
 	}
 
 	// Extract the last part of the module path
