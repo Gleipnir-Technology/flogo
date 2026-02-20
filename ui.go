@@ -29,8 +29,8 @@ type uiState struct {
 	isCompiling      bool
 	lastBuildOutput  string
 	lastBuildSuccess bool
-	lastRunStdout    string
-	lastRunStderr    string
+	lastRunStdout    []byte
+	lastRunStderr    []byte
 	runnerStatus     runnerStatus
 }
 
@@ -151,16 +151,18 @@ func (u ui) drawBuildFailure() {
 		}
 	}
 }
+func (u ui) drawBytes(x, y int, buffer []byte) {
+}
 
 func (u ui) drawCompilation() {
 }
 func (u ui) drawRunning() {
-	if u.state.lastRunStderr != "" {
+	if len(u.state.lastRunStderr) > 0 {
 		u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorYellow), "stderr:")
-		u.drawTextMultiline(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStderr)
-	} else if u.state.lastRunStdout != "" {
+		u.drawBytesMultiline(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStderr)
+	} else if len(u.state.lastRunStdout) > 0 {
 		u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorGreen), "stdout:")
-		u.drawTextMultiline(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStdout)
+		u.drawBytesMultiline(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStdout)
 	}
 }
 func (u ui) drawStatus(status string, style tcell.Style) {
@@ -171,12 +173,10 @@ func (u ui) drawText(x, y int, style tcell.Style, text string) {
 		u.screen.SetContent(x+i, y, r, nil, style)
 	}
 }
-func (u ui) drawTextMultiline(x, y int, style tcell.Style, text string) {
-	// Split output into lines and display them
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		u.drawText(x, y+i, style, line)
-	}
+func (u ui) drawBytesMultiline(x, y int, style tcell.Style, buffer []byte) {
+	// Convert the buffer into ansi sequences
+	segments := ParseANSI(string(buffer))
+	DrawStyledText(u.screen, x, y, segments)
 }
 func (u ui) drawTitle() {
 	if u.state.isCompiling {

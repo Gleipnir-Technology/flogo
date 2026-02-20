@@ -2,11 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/rs/zerolog/log"
@@ -24,8 +24,8 @@ const (
 )
 
 type EventRunner struct {
-	Message string
-	Type    EventRunnerType
+	Buffer []byte
+	Type   EventRunnerType
 }
 type Runner struct {
 	DoRestart <-chan struct{}
@@ -34,8 +34,8 @@ type Runner struct {
 
 	buildOutput string
 	child       *exec.Cmd
-	stdout      strings.Builder
-	stderr      strings.Builder
+	stdout      bytes.Buffer
+	stderr      bytes.Buffer
 }
 
 func (r *Runner) Run(ctx context.Context) {
@@ -51,12 +51,12 @@ func (r *Runner) Run(ctx context.Context) {
 	if base == "flogo" {
 		logger.Info().Msg("Refusing to infinitely recurse on flogo")
 		r.OnEvent <- EventRunner{
-			Message: "",
-			Type:    EventRunnerStart,
+			Buffer: []byte(""),
+			Type:   EventRunnerStart,
 		}
 		r.OnEvent <- EventRunner{
-			Message: "no recursing!",
-			Type:    EventRunnerStdout,
+			Buffer: []byte("no recursing!"),
+			Type:   EventRunnerStdout,
 		}
 		return
 	}
@@ -79,18 +79,18 @@ func (r *Runner) Run(ctx context.Context) {
 	}
 }
 
-func (r *Runner) onStdout(s string) {
-	r.stdout.WriteString(s + "\n")
+func (r *Runner) onStdout(b []byte) {
+	r.stdout.Write(b)
 	r.OnEvent <- EventRunner{
-		Message: r.stdout.String(),
-		Type:    EventRunnerStdout,
+		Buffer: r.stdout.Bytes(),
+		Type:   EventRunnerStdout,
 	}
 }
-func (r *Runner) onStderr(s string) {
-	r.stderr.WriteString(s + "\n")
+func (r *Runner) onStderr(b []byte) {
+	r.stderr.Write(b)
 	r.OnEvent <- EventRunner{
-		Message: r.stderr.String(),
-		Type:    EventRunnerStderr,
+		Buffer: r.stderr.Bytes(),
+		Type:   EventRunnerStderr,
 	}
 }
 func (r *Runner) parent(ctx context.Context, chan_restart <-chan struct{}) {
@@ -110,8 +110,8 @@ func (r *Runner) restart(ctx context.Context) {
 	if _, err := os.Stat(r.buildOutput); os.IsNotExist(err) {
 		logger.Info().Str("build_output", r.buildOutput).Msg("Build output doesn't exist")
 		r.OnEvent <- EventRunner{
-			Message: "",
-			Type:    EventRunnerWaiting,
+			Buffer: []byte(""),
+			Type:   EventRunnerWaiting,
 		}
 		return
 	}
@@ -142,16 +142,16 @@ func (r *Runner) restart(ctx context.Context) {
 		return
 	}
 	r.OnEvent <- EventRunner{
-		Message: "",
-		Type:    EventRunnerStart,
+		Buffer: []byte(""),
+		Type:   EventRunnerStart,
 	}
 
 	// Read stdout line by line
 	scanner := bufio.NewScanner(stdout)
 	go func() {
 		for scanner.Scan() {
-			text := scanner.Text()
-			r.onStdout(text)
+			b := scanner.Bytes()
+			r.onStdout(b)
 		}
 	}()
 
@@ -159,23 +159,23 @@ func (r *Runner) restart(ctx context.Context) {
 	stderrScanner := bufio.NewScanner(stderr)
 	go func() {
 		for stderrScanner.Scan() {
-			text := stderrScanner.Text()
-			r.onStderr(text)
+			b := stderrScanner.Bytes()
+			r.onStderr(b)
 		}
 	}()
 
 	// Wait for the command to finish
 	if e := r.child.Wait(); e != nil {
 		r.OnEvent <- EventRunner{
-			Message: e.Error(),
-			Type:    EventRunnerStopErr,
+			Buffer: []byte(e.Error()),
+			Type:   EventRunnerStopErr,
 		}
 		r.child = nil
 		return
 	}
 	r.OnEvent <- EventRunner{
-		Message: "",
-		Type:    EventRunnerStopOK,
+		Buffer: []byte(""),
+		Type:   EventRunnerStopOK,
 	}
 	r.child = nil
 }

@@ -138,16 +138,16 @@ func main() {
 			switch evt.Type {
 			case EventRunnerStart:
 				u.state.runnerStatus = runnerStatusRunning
-				u.state.lastRunStdout = ""
-				u.state.lastRunStderr = ""
+				u.state.lastRunStdout = []byte{}
+				u.state.lastRunStderr = []byte{}
 			case EventRunnerStopOK:
 				u.state.runnerStatus = runnerStatusStopOK
 			case EventRunnerStopErr:
 				u.state.runnerStatus = runnerStatusStopErr
 			case EventRunnerStdout:
-				u.state.lastRunStdout = evt.Message
+				u.state.lastRunStdout = evt.Buffer
 			case EventRunnerStderr:
-				u.state.lastRunStderr = evt.Message
+				u.state.lastRunStderr = evt.Buffer
 			case EventRunnerWaiting:
 				u.state.runnerStatus = runnerStatusStopErr
 			default:
