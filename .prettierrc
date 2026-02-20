@@ -1,0 +1,18 @@
+{
+  "plugins": ["/nix/store/6kfm5qrd2bckffxphb5ylvbg3sz1657r-prettier-plugin-go-template-0.0.15-unstable-2023-07-26/lib/node_modules/prettier-plugin-go-template/lib/index.js"],
+  "overrides": [
+    {
+      "files": ["*.html"],
+      "options": {
+        "parser": "go-template",
+	"useTabs": true,
+      },
+    },
+    {
+      "files": ["*.js"],
+      "options": {
+	"useTabs": true,
+      },
+    },
+  ],
+}
