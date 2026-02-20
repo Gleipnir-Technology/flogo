@@ -40,7 +40,6 @@ type SSEConnection struct {
 }
 
 func (c *SSEConnection) SendState(w http.ResponseWriter, state *flogoState) error {
-	log.Debug().Msg("Send state")
 	return send(w, MessageSSE{
 		Body: MessageState{
 			BuilderStatus: MessageStatus{
