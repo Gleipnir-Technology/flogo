@@ -35,7 +35,7 @@ func startServer(ctx context.Context, bind string, upstream url.URL) {
 	})
 
 	// Handle Server-Sent Events
-	//r.Get("/events", sseHandler)
+	r.Get("/.flogo/events", sseHandler)
 
 	// Catch-all route to serve the HTML for any other path
 	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
