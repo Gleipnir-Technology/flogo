@@ -203,24 +203,23 @@ func reload() {
 }
 func setupLogging(file *os.File) {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	writer := zerolog.NewConsoleWriter()
-	writer.Out = file
-	/*
-		writer.FormatLevel = func(i interface{}) string { return strings.ToUpper(fmt.Sprintf("%-6s", i)) }
-		writer.FormatFieldName = func(i interface{}) string { return fmt.Sprintf("%s:", i) }
-		writer.FormatPartValueByName = func(i interface{}, s string) string {
-			var ret string
-			switch s {
-			case "one":
-				ret = strings.ToUpper(fmt.Sprintf("%s", i))
-			case "two":
-				ret = strings.ToLower(fmt.Sprintf("%s", i))
-			case "three":
-				ret = strings.ToLower(fmt.Sprintf("(%s)", i))
-			}
-			return ret
-		}
-	*/
-	log.Logger = zerolog.New(writer)
+
+	// Track start time for delta timestamps
+	startTime := time.Now()
+
+	writer := zerolog.ConsoleWriter{
+		Out:        file,
+		TimeFormat: "15:04:05", // placeholder, will be overridden
+		NoColor:    false,      // Enable colors for tail -f
+	}
+
+	// Custom timestamp formatter showing elapsed time
+	writer.FormatTimestamp = func(i interface{}) string {
+		elapsed := time.Since(startTime)
+		return fmt.Sprintf("\x1b[90m[+%s]\x1b[0m",
+			elapsed.Round(time.Millisecond))
+	}
+
+	// Create logger with timestamp
+	log.Logger = zerolog.New(writer).With().Timestamp().Logger()
 }
