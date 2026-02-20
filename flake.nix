@@ -23,6 +23,7 @@
 						pkgs.go
 						pkgs.gotools
 						pkgs.lefthook
+						pkgs.prettier
 					];
 				};
 			}
