@@ -22,8 +22,8 @@ type MessageHeartbeat struct {
 	Time time.Time `json:"time"`
 }
 type MessageSSE struct {
-	Type string      `json:"type"`
-	Body interface{} `json:"message"`
+	Content interface{} `json:"content"`
+	Type    string      `json:"type"`
 }
 type MessageStatus struct {
 	Stdout string `json:"stdout"`
@@ -31,8 +31,8 @@ type MessageStatus struct {
 	Status string `json:"status"`
 }
 type MessageState struct {
-	BuilderStatus MessageStatus `json:"status_builder"`
-	RunnerStatus  MessageStatus `json:"status_runner"`
+	BuilderStatus MessageStatus `json:"builder"`
+	RunnerStatus  MessageStatus `json:"runner"`
 }
 type SSEConnection struct {
 	chanState chan *flogoState
@@ -41,7 +41,7 @@ type SSEConnection struct {
 
 func (c *SSEConnection) SendState(w http.ResponseWriter, state *flogoState) error {
 	return send(w, MessageSSE{
-		Body: MessageState{
+		Content: MessageState{
 			BuilderStatus: MessageStatus{
 				Stdout: state.lastBuildOutput,
 				Stderr: "",
@@ -58,7 +58,7 @@ func (c *SSEConnection) SendState(w http.ResponseWriter, state *flogoState) erro
 }
 func (c *SSEConnection) SendHeartbeat(w http.ResponseWriter, t time.Time) error {
 	return send(w, MessageSSE{
-		Body: MessageHeartbeat{
+		Content: MessageHeartbeat{
 			Time: t,
 		},
 		Type: "heartbeat",

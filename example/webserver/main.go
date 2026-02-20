@@ -28,6 +28,6 @@ func main() {
 	if bind == "" {
 		bind = ":9001"
 	}
-	fmt.Printf("Server starting on port %s..\n", bind)
+	fmt.Printf("Server starting on port %s...\n", bind)
 	log.Fatal(http.ListenAndServe(bind, r))
 }

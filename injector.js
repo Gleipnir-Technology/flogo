@@ -7,16 +7,18 @@ class StatusDisplay {
 
 		this.container = element;
 		this.STATUS = {
-			FINE: "fine",
 			BUILDING: "building",
+			CONNECTING: "connecting",
 			ERROR: "error",
+			FINE: "fine",
 		};
 
 		this.COLORS = {
-			ERROR: "#ffebee",
-			ERROR_TEXT: "#c62828",
 			BUILDING: "#fff9c4",
 			BUILDING_TEXT: "#f57f17",
+			CONNECTING: "#fff9c4",
+			ERROR: "#ffebee",
+			ERROR_TEXT: "#c62828",
 		};
 
 		this.init();
@@ -121,6 +123,10 @@ class StatusDisplay {
 		this.setStatus(this.STATUS.BUILDING, message);
 	}
 
+	showConnecting() {
+		this.setStatus(this.STATUS.CONNECTING, "connecting...");
+	}
+
 	showError(message, error) {
 		const stackTrace = error ? error.stack || error.toString() : null;
 		this.setStatus(this.STATUS.ERROR, message, stackTrace);
@@ -137,6 +143,18 @@ class StatusDisplay {
 	}
 }
 
+function updateState(statusDisplay, content) {
+	if (content.builder.status == "failed") {
+		statusDisplay.showError(
+			"build failed",
+			content.builder.stderr + content.builder.stdout,
+		);
+	} else if (content.builder.status == "compiling") {
+		statusDisplay.showBuilding("compiling...");
+	} else {
+		statusDisplay.hide();
+	}
+}
 document.addEventListener("DOMContentLoaded", function () {
 	const flogoElement = document.getElementById("flogo");
 	const statusDisplay = new StatusDisplay(flogoElement);
@@ -153,7 +171,7 @@ document.addEventListener("DOMContentLoaded", function () {
 			eventSource.close();
 		}
 
-		statusDisplay.showBuilding("Compiling...");
+		statusDisplay.showConnecting();
 		eventSource = new EventSource("/.flogo/events");
 
 		eventSource.onopen = function () {
@@ -162,7 +180,14 @@ document.addEventListener("DOMContentLoaded", function () {
 		};
 
 		eventSource.onmessage = function (event) {
-			console.log("flogo: Received message:", event.data);
+			const msg = JSON.parse(event.data);
+			if (msg.type === "heartbeat") {
+				return;
+			} else if (msg.type === "state") {
+				updateState(statusDisplay, msg.content);
+			} else {
+				console.warn("Need to handle flogo message", msg.type, msg);
+			}
 		};
 
 		eventSource.addEventListener("connected", function (event) {
