@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	//"time"
 
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
+	"github.com/rs/zerolog/log"
 )
 
 type ui struct {
@@ -63,7 +63,8 @@ func (u ui) Fini() {
 func (u ui) Run(ctx context.Context) {
 	//var err error
 	if err := u.screen.Init(); err != nil {
-		log.Fatalf("%+v", err)
+		log.Error().Err(err).Msg("UI run failure")
+		return
 	}
 
 	// Set default text style
@@ -175,8 +176,12 @@ func (u ui) drawText(x, y int, style tcell.Style, text string) {
 }
 func (u ui) drawBytesMultiline(x, y int, style tcell.Style, buffer []byte) {
 	// Convert the buffer into ansi sequences
-	segments := ParseANSI(string(buffer))
-	DrawStyledText(u.screen, x, y, segments)
+	text, err := ParseANSI(buffer)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to parse ANSI")
+		return
+	}
+	DrawStyledText(u.screen, x, y, text)
 }
 func (u ui) drawTitle() {
 	if u.state.isCompiling {

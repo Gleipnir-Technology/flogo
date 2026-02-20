@@ -6,6 +6,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gdamore/tcell/v3 v3.1.2
 	github.com/go-chi/chi/v5 v5.2.5
+	github.com/leaanthony/go-ansi-parser v1.6.1
 	github.com/rs/zerolog v1.34.0
 )
 

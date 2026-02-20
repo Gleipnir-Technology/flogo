@@ -1,68 +1,12 @@
 package main
 
 import (
-	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/gdamore/tcell/v3"
-	"github.com/rs/zerolog/log"
+	"github.com/leaanthony/go-ansi-parser"
 )
-
-// ParseANSI parses a buffer with ANSI escape sequences and returns
-// segments with their associated styles
-type StyledSegment struct {
-	Text  string
-	Style tcell.Style
-}
-
-func ParseANSI(input string) []StyledSegment {
-	var segments []StyledSegment
-	currentStyle := tcell.StyleDefault
-
-	// Regex to match ANSI escape sequences
-	ansiRegex := regexp.MustCompile(`\x1b\[([0-9;]*)m`)
-
-	lastEnd := 0
-	matches := ansiRegex.FindAllStringSubmatchIndex(input, -1)
-
-	for _, match := range matches {
-		start, end := match[0], match[1]
-		codeStart, codeEnd := match[2], match[3]
-
-		// Add text before this escape sequence
-		if start > lastEnd {
-			text := input[lastEnd:start]
-			if text != "" {
-				segments = append(segments, StyledSegment{
-					Text:  text,
-					Style: currentStyle,
-				})
-			}
-		}
-
-		// Parse the escape code and update style
-		if codeStart != -1 {
-			codes := input[codeStart:codeEnd]
-			currentStyle = applyANSICodes(currentStyle, codes)
-		}
-
-		lastEnd = end
-	}
-
-	// Add remaining text
-	if lastEnd < len(input) {
-		text := input[lastEnd:]
-		if text != "" {
-			segments = append(segments, StyledSegment{
-				Text:  text,
-				Style: currentStyle,
-			})
-		}
-	}
-
-	return segments
-}
 
 func applyANSICodes(style tcell.Style, codes string) tcell.Style {
 	if codes == "" || codes == "0" {
@@ -102,24 +46,6 @@ func applyANSICodes(style tcell.Style, codes string) tcell.Style {
 		case 37:
 			style = style.Foreground(tcell.ColorSilver)
 
-		// Bright foreground colors (90-97)
-		case 90:
-			style = style.Foreground(tcell.ColorGray)
-		case 91:
-			style = style.Foreground(tcell.ColorRed)
-		case 92:
-			style = style.Foreground(tcell.ColorLime)
-		case 93:
-			style = style.Foreground(tcell.ColorYellow)
-		case 94:
-			style = style.Foreground(tcell.ColorBlue)
-		case 95:
-			style = style.Foreground(tcell.ColorFuchsia)
-		case 96:
-			style = style.Foreground(tcell.ColorAqua)
-		case 97:
-			style = style.Foreground(tcell.ColorWhite)
-
 		// Background colors (40-47)
 		case 40:
 			style = style.Background(tcell.ColorBlack)
@@ -137,19 +63,38 @@ func applyANSICodes(style tcell.Style, codes string) tcell.Style {
 			style = style.Background(tcell.ColorTeal)
 		case 47:
 			style = style.Background(tcell.ColorSilver)
+		// Bright foreground colors (90-97)
+		case 90:
+			style = style.Foreground(tcell.ColorGray)
+		case 91:
+			style = style.Foreground(tcell.ColorRed)
+		case 92:
+			style = style.Foreground(tcell.ColorLime)
+		case 93:
+			style = style.Foreground(tcell.ColorYellow)
+		case 94:
+			style = style.Foreground(tcell.ColorBlue)
+		case 95:
+			style = style.Foreground(tcell.ColorFuchsia)
+		case 96:
+			style = style.Foreground(tcell.ColorAqua)
+		case 97:
+			style = style.Foreground(tcell.ColorWhite)
 		}
+
 	}
 
 	return style
 }
 
 // DrawStyledText renders styled segments to the tcell screen
-func DrawStyledText(s tcell.Screen, x, y int, segments []StyledSegment) {
+func DrawStyledText(s tcell.Screen, x, y int, text []*ansi.StyledText) {
 	col := x
 	row := y
-	for _, seg := range segments {
-		for _, r := range seg.Text {
-			s.SetContent(col, row, r, nil, seg.Style)
+	for _, seg := range text {
+		style := convertStyle(seg)
+		for _, r := range seg.Label {
+			s.SetContent(col, row, r, nil, style)
 			col++
 			if r == '\n' {
 			}
@@ -157,4 +102,31 @@ func DrawStyledText(s tcell.Screen, x, y int, segments []StyledSegment) {
 		col = x
 		row = row + 1
 	}
+}
+
+func ParseANSI(buf []byte) ([]*ansi.StyledText, error) {
+	return ansi.Parse(string(buf))
+}
+
+func convertStyle(t *ansi.StyledText) tcell.Style {
+	if t == nil || t.FgCol == nil {
+		return tcell.StyleDefault
+	}
+	result := tcell.StyleDefault.Foreground(
+		tcell.NewRGBColor(
+			int32(t.FgCol.Rgb.R),
+			int32(t.FgCol.Rgb.G),
+			int32(t.FgCol.Rgb.B),
+		),
+	)
+	if t.BgCol == nil {
+		return result
+	}
+	return result.Background(
+		tcell.NewRGBColor(
+			int32(t.BgCol.Rgb.R),
+			int32(t.BgCol.Rgb.G),
+			int32(t.BgCol.Rgb.B),
+		),
+	)
 }
