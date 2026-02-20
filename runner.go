@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/rs/zerolog/log"
 )
@@ -30,36 +31,23 @@ type Runner struct {
 	DoRestart <-chan struct{}
 	OnEvent   chan<- EventRunner
 	Target    string
-	stdout    strings.Builder
-	stderr    strings.Builder
+
+	buildOutput string
+	child       *exec.Cmd
+	stdout      strings.Builder
+	stderr      strings.Builder
 }
 
 func (r *Runner) Run(ctx context.Context) {
 	logger := log.Ctx(ctx)
-	build_output, err := determineBuildOutputAbs(r.Target)
+	var err error
+	r.buildOutput, err = determineBuildOutputAbs(r.Target)
 	if err != nil {
 		logger.Warn().Err(err).Msg("failed to determine build output name")
 		return
 	}
-	logger.Info().Str("build", build_output).Msg("Build output")
+	base := filepath.Base(r.buildOutput)
 	// Avoid infinite recursion when we self-host
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Info().Msg("closing runner")
-			return
-		case <-r.DoRestart:
-			go r.Restart(ctx, build_output)
-		}
-	}
-}
-
-func (r *Runner) Restart(ctx context.Context, build_output string) {
-	logger := log.Ctx(ctx)
-	logger.Debug().Msg("runner restart")
-	r.stdout.Reset()
-	r.stderr.Reset()
-	base := filepath.Base(build_output)
 	if base == "flogo" {
 		logger.Info().Msg("Refusing to infinitely recurse on flogo")
 		r.OnEvent <- EventRunner{
@@ -72,8 +60,55 @@ func (r *Runner) Restart(ctx context.Context, build_output string) {
 		}
 		return
 	}
-	if _, err := os.Stat(build_output); os.IsNotExist(err) {
-		logger.Info().Str("build_output", build_output).Msg("Build output doesn't exist")
+	logger.Info().Str("build", r.buildOutput).Msg("Build output")
+	chan_restart := make(chan struct{})
+	go r.parent(ctx, chan_restart)
+	for {
+		select {
+		case <-ctx.Done():
+			if r.child != nil {
+				r.child.Process.Signal(syscall.SIGINT)
+			}
+			return
+		case <-r.DoRestart:
+			if r.child != nil {
+				r.child.Process.Signal(syscall.SIGINT)
+			}
+			chan_restart <- struct{}{}
+		}
+	}
+}
+
+func (r *Runner) onStdout(s string) {
+	r.stdout.WriteString(s + "\n")
+	r.OnEvent <- EventRunner{
+		Message: r.stdout.String(),
+		Type:    EventRunnerStdout,
+	}
+}
+func (r *Runner) onStderr(s string) {
+	r.stderr.WriteString(s + "\n")
+	r.OnEvent <- EventRunner{
+		Message: r.stderr.String(),
+		Type:    EventRunnerStderr,
+	}
+}
+func (r *Runner) parent(ctx context.Context, chan_restart <-chan struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-chan_restart:
+			r.restart(ctx)
+		}
+	}
+}
+func (r *Runner) restart(ctx context.Context) {
+	logger := log.Ctx(ctx)
+	r.stdout.Reset()
+	r.stderr.Reset()
+	if _, err := os.Stat(r.buildOutput); os.IsNotExist(err) {
+		logger.Info().Str("build_output", r.buildOutput).Msg("Build output doesn't exist")
 		r.OnEvent <- EventRunner{
 			Message: "",
 			Type:    EventRunnerWaiting,
@@ -81,26 +116,29 @@ func (r *Runner) Restart(ctx context.Context, build_output string) {
 		return
 	}
 	// Create the command
-	cmd := exec.Command(build_output)
-	cmd.Dir = r.Target
+	r.child = exec.Command(r.buildOutput)
+	r.child.Dir = r.Target
 
 	// Get a pipe for stdout
-	stdout, err := cmd.StdoutPipe()
+	stdout, err := r.child.StdoutPipe()
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to get stdout pipe")
+		r.child = nil
 		return
 	}
 
 	// Optionally get stderr too
-	stderr, err := cmd.StderrPipe()
+	stderr, err := r.child.StderrPipe()
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to get stderr pipe")
+		r.child = nil
 		return
 	}
 
 	// Start the command (non-blocking)
-	if err := cmd.Start(); err != nil {
-		logger.Error().Err(err).Str("build_output", build_output).Msg("Failed to start")
+	if err := r.child.Start(); err != nil {
+		logger.Error().Err(err).Str("build_output", r.buildOutput).Msg("Failed to start")
+		r.child = nil
 		return
 	}
 	r.OnEvent <- EventRunner{
@@ -127,30 +165,17 @@ func (r *Runner) Restart(ctx context.Context, build_output string) {
 	}()
 
 	// Wait for the command to finish
-	if e := cmd.Wait(); e != nil {
+	if e := r.child.Wait(); e != nil {
 		r.OnEvent <- EventRunner{
 			Message: e.Error(),
 			Type:    EventRunnerStopErr,
 		}
+		r.child = nil
+		return
 	}
 	r.OnEvent <- EventRunner{
 		Message: "",
 		Type:    EventRunnerStopOK,
 	}
-	log.Debug().Msg("exiting runner restart")
-}
-
-func (r *Runner) onStdout(s string) {
-	r.stdout.WriteString(s + "\n")
-	r.OnEvent <- EventRunner{
-		Message: r.stdout.String(),
-		Type:    EventRunnerStdout,
-	}
-}
-func (r *Runner) onStderr(s string) {
-	r.stderr.WriteString(s + "\n")
-	r.OnEvent <- EventRunner{
-		Message: r.stderr.String(),
-		Type:    EventRunnerStderr,
-	}
+	r.child = nil
 }
