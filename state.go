@@ -140,9 +140,9 @@ func (mgr *flogoStateManager) Run(bind string, target string) error {
 	event_q := u.EventQ()
 	var cause_of_death error
 	for mgr.isRunning {
-		u.Sync(&mgr.state)
+		u.Redraw(&mgr.state)
 		select {
-		case cause_of_death := <-mgr.chanSomethingDied:
+		case cause_of_death = <-mgr.chanSomethingDied:
 			log.Error().Err(cause_of_death).Msg("something died")
 			mgr.isRunning = false
 		case evt := <-mgr.chanBuilderEvents:
@@ -150,7 +150,7 @@ func (mgr *flogoStateManager) Run(bind string, target string) error {
 		case evt := <-mgr.chanRunnerEvents:
 			mgr.handleEventRunner(evt)
 		case evt := <-event_q:
-			mgr.handleEventUI(evt)
+			mgr.handleEventUI(u, evt)
 		}
 		mgr.updateWebserver()
 	}
@@ -198,7 +198,7 @@ func (mgr *flogoStateManager) handleEventRunner(evt EventRunner) {
 		log.Debug().Msg("runner unknown")
 	}
 }
-func (mgr *flogoStateManager) handleEventUI(evt tcell.Event) {
+func (mgr *flogoStateManager) handleEventUI(u *ui, evt tcell.Event) {
 	switch ev := evt.(type) {
 	case *tcell.EventClipboard:
 		log.Info().Msg("event clipboard")
@@ -220,7 +220,8 @@ func (mgr *flogoStateManager) handleEventUI(evt tcell.Event) {
 	case *tcell.EventPaste:
 		log.Info().Msg("event paste")
 	case *tcell.EventResize:
-		log.Info().Msg("event resize")
+		u.Redraw(&mgr.state)
+		u.Sync()
 	case *tcell.EventTime:
 		log.Info().Msg("event time")
 	default:
