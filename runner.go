@@ -29,6 +29,7 @@ type EventRunner struct {
 }
 type Runner struct {
 	DoRestart <-chan struct{}
+	OnDeath   chan<- error
 	OnEvent   chan<- EventRunner
 	Target    string
 
@@ -44,6 +45,7 @@ func (r *Runner) Run(ctx context.Context) {
 	r.buildOutput, err = determineBuildOutputAbs(r.Target)
 	if err != nil {
 		logger.Warn().Err(err).Msg("failed to determine build output name")
+		r.OnDeath <- fmt.Errorf("Failed to determine build output name")
 		return
 	}
 	base := filepath.Base(r.buildOutput)

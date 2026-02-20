@@ -88,6 +88,7 @@ func main() {
 
 	runner := Runner{
 		DoRestart: chan_runner_restart,
+		OnDeath:   something_died,
 		OnEvent:   chan_runner_events,
 		Target:    *target,
 	}
@@ -112,11 +113,12 @@ func main() {
 
 	event_q := u.EventQ()
 	is_running := true
+	var cause_of_death error
 	for is_running {
 		u.Sync()
 		select {
-		case death := <-something_died:
-			log.Error().Err(death).Msg("something died")
+		case cause_of_death := <-something_died:
+			log.Error().Err(cause_of_death).Msg("something died")
 			is_running = false
 		case evt := <-chan_builder_events:
 			switch evt.Type {
@@ -198,8 +200,12 @@ func main() {
 	}
 	cancel()
 	u.Fini()
+	if cause_of_death != nil {
+		fmt.Printf("Instadeath: %+v\n", cause_of_death)
+	}
 }
 func reload() {
+	log.Info().Msg("fake reload")
 }
 func setupLogging(file *os.File) {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
