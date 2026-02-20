@@ -81,6 +81,7 @@ func (r *Runner) Run(ctx context.Context) {
 
 func (r *Runner) onStdout(b []byte) {
 	r.stdout.Write(b)
+	r.stdout.Write([]byte("\n"))
 	r.OnEvent <- EventRunner{
 		Buffer: r.stdout.Bytes(),
 		Type:   EventRunnerStdout,
@@ -88,6 +89,7 @@ func (r *Runner) onStdout(b []byte) {
 }
 func (r *Runner) onStderr(b []byte) {
 	r.stderr.Write(b)
+	r.stderr.Write([]byte("\n"))
 	r.OnEvent <- EventRunner{
 		Buffer: r.stderr.Bytes(),
 		Type:   EventRunnerStderr,
