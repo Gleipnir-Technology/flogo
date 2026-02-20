@@ -79,7 +79,7 @@ func (u ui) Sync() {
 }
 
 func (u ui) drawBuildFailure(state *flogoState) {
-	u.drawStatus("Build Failed. Errors:", tcell.StyleDefault.Foreground(color.Red))
+	u.drawStatus("Build errors:", tcell.StyleDefault.Foreground(color.Red))
 
 	// Split output into lines and display them
 	lines := strings.Split(state.lastBuildOutput, "\n")
@@ -127,8 +127,12 @@ func (u ui) drawBytesMultiline(x, y int, style tcell.Style, buffer []byte) {
 func (u ui) drawTitle(state *flogoState) {
 	if state.builderStatus == builderStatusCompiling {
 		u.drawText(0, 0, tcell.StyleDefault.Foreground(color.Yellow).Bold(true), "Compiling")
-	} else {
+	} else if state.builderStatus == builderStatusFailed {
+		u.drawText(0, 0, tcell.StyleDefault.Foreground(color.Red).Bold(true), "Failed")
+	} else if state.builderStatus == builderStatusOK {
 		u.drawText(0, 0, tcell.StyleDefault.Foreground(color.Green).Bold(true), "Idle")
+	} else {
+		u.drawText(0, 0, tcell.StyleDefault.Foreground(color.Purple).Bold(true), "Unknown")
 	}
 
 	switch state.runnerStatus {
