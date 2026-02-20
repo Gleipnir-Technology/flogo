@@ -126,6 +126,7 @@ func (mgr *flogoStateManager) Run(bind string, target string) error {
 		case evt := <-event_q:
 			mgr.handleEventUI(evt)
 		}
+		mgr.updateWebserver()
 	}
 	cancel()
 	u.Fini()
@@ -202,4 +203,7 @@ func (mgr *flogoStateManager) handleEventUI(evt tcell.Event) {
 			log.Info().Str("type", t.Name()).Msg("unrecognized event")
 		}
 	}
+}
+func (mgr *flogoStateManager) updateWebserver() {
+	mgr.chanWebserverChange <- &mgr.state
 }
