@@ -145,8 +145,7 @@ document.addEventListener("DOMContentLoaded", function () {
 	let retryCount = 0;
 	let retryTimeout = null;
 	const baseDelay = 1000; // Start at 1 second
-	const maxDelay = 30000; // Cap at 30 seconds
-	const maxRetries = Infinity; // Or set a limit like 10
+	const maxDelay = 10000; // Cap at 10 seconds
 
 	function connect() {
 		// Clean up existing connection
@@ -181,13 +180,6 @@ document.addEventListener("DOMContentLoaded", function () {
 		// Clear any existing retry timeout
 		if (retryTimeout) {
 			clearTimeout(retryTimeout);
-		}
-
-		// Check if max retries reached (if you want a limit)
-		if (retryCount >= maxRetries) {
-			console.error("flogo: Max retries reached");
-			statusDisplay.showBuilding("Connection failed");
-			return;
 		}
 
 		retryCount++;
