@@ -49,9 +49,9 @@ func main() {
 	log.Info().Msg("entering main loop")
 
 	// Keep track of the state of everything
-	state := newFlogoState()
+	mgr := newFlogoStateManager()
 
-	err = state.Run(bind, *target)
+	err = mgr.Run(bind, *target)
 	if err != nil {
 		fmt.Println("%+v", err)
 		os.Exit(1)

@@ -12,18 +12,22 @@ import (
 )
 
 type flogoState struct {
-	builderStatus     builderStatus
-	chanToBuild       chan struct{}
-	chanBuilderEvents chan EventBuilder
-	chanRunnerEvents  chan EventRunner
-	chanRunnerRestart chan struct{}
-	chanSomethingDied chan error
-	isRunning         bool
-	lastBuildOutput   string
-	lastBuildSuccess  bool
-	lastRunStdout     []byte
-	lastRunStderr     []byte
-	runnerStatus      runnerStatus
+	builderStatus    builderStatus
+	lastBuildOutput  string
+	lastBuildSuccess bool
+	lastRunStdout    []byte
+	lastRunStderr    []byte
+	runnerStatus     runnerStatus
+}
+type flogoStateManager struct {
+	chanToBuild         chan struct{}
+	chanBuilderEvents   chan EventBuilder
+	chanRunnerEvents    chan EventRunner
+	chanRunnerRestart   chan struct{}
+	chanSomethingDied   chan error
+	chanWebserverChange chan *flogoState
+	isRunning           bool
+	state               flogoState
 }
 type builderStatus int
 
@@ -42,24 +46,27 @@ const (
 	runnerStatusWaiting
 )
 
-func newFlogoState() flogoState {
-	return flogoState{
-		builderStatus:     builderStatusOK,
-		chanToBuild:       make(chan struct{}),
-		chanBuilderEvents: make(chan EventBuilder),
-		chanRunnerEvents:  make(chan EventRunner),
-		chanRunnerRestart: make(chan struct{}),
-		chanSomethingDied: make(chan error),
-		isRunning:         true,
-		lastBuildOutput:   "",
-		lastBuildSuccess:  false,
-		lastRunStdout:     []byte{},
-		lastRunStderr:     []byte{},
-		runnerStatus:      runnerStatusWaiting,
+func newFlogoStateManager() flogoStateManager {
+	return flogoStateManager{
+		chanToBuild:         make(chan struct{}),
+		chanBuilderEvents:   make(chan EventBuilder),
+		chanRunnerEvents:    make(chan EventRunner),
+		chanRunnerRestart:   make(chan struct{}),
+		chanSomethingDied:   make(chan error),
+		chanWebserverChange: make(chan *flogoState, 10),
+		isRunning:           true,
+		state: flogoState{
+			builderStatus:    builderStatusOK,
+			lastBuildOutput:  "",
+			lastBuildSuccess: false,
+			lastRunStdout:    []byte{},
+			lastRunStderr:    []byte{},
+			runnerStatus:     runnerStatusWaiting,
+		},
 	}
 }
 
-func (state *flogoState) Run(bind string, target string) error {
+func (mgr *flogoStateManager) Run(bind string, target string) error {
 	// Create a context that we can cancel for signaling all goroutines to clean up
 	ctx, cancel := context.WithCancel(log.With().Logger().WithContext(context.Background()))
 	defer cancel()
@@ -67,26 +74,26 @@ func (state *flogoState) Run(bind string, target string) error {
 	// Create channels for goroutine comms
 
 	watcher := Watcher{
-		OnBuild: state.chanToBuild,
-		OnDeath: state.chanSomethingDied,
+		OnBuild: mgr.chanToBuild,
+		OnDeath: mgr.chanSomethingDied,
 		Target:  target,
 	}
 	go watcher.Run(ctx)
 
 	builder := Builder{
 		Debounce: time.Millisecond * 300,
-		OnEvent:  state.chanBuilderEvents,
-		OnDeath:  state.chanSomethingDied,
+		OnEvent:  mgr.chanBuilderEvents,
+		OnDeath:  mgr.chanSomethingDied,
 		Target:   target,
-		ToBuild:  state.chanToBuild,
+		ToBuild:  mgr.chanToBuild,
 	}
 	go builder.Run(ctx)
-	state.chanToBuild <- struct{}{}
+	mgr.chanToBuild <- struct{}{}
 
 	runner := Runner{
-		DoRestart: state.chanRunnerRestart,
-		OnDeath:   state.chanSomethingDied,
-		OnEvent:   state.chanRunnerEvents,
+		DoRestart: mgr.chanRunnerRestart,
+		OnDeath:   mgr.chanSomethingDied,
+		OnEvent:   mgr.chanRunnerEvents,
 		Target:    target,
 	}
 	go runner.Run(ctx)
@@ -101,22 +108,23 @@ func (state *flogoState) Run(bind string, target string) error {
 	defer u.Fini()
 
 	// Start the web server
-	go startServer(ctx, bind, *upstreamURL)
+	ws := NewWebserver(mgr.chanWebserverChange)
+	go ws.Start(ctx, bind, *upstreamURL)
 
 	event_q := u.EventQ()
 	var cause_of_death error
-	for state.isRunning {
-		u.Sync(state)
+	for mgr.isRunning {
+		u.Sync(&mgr.state)
 		select {
-		case cause_of_death := <-state.chanSomethingDied:
+		case cause_of_death := <-mgr.chanSomethingDied:
 			log.Error().Err(cause_of_death).Msg("something died")
-			state.isRunning = false
-		case evt := <-state.chanBuilderEvents:
-			state.handleEventBuilder(evt)
-		case evt := <-state.chanRunnerEvents:
-			state.handleEventRunner(evt)
+			mgr.isRunning = false
+		case evt := <-mgr.chanBuilderEvents:
+			mgr.handleEventBuilder(evt)
+		case evt := <-mgr.chanRunnerEvents:
+			mgr.handleEventRunner(evt)
 		case evt := <-event_q:
-			state.handleEventUI(evt)
+			mgr.handleEventUI(evt)
 		}
 	}
 	cancel()
@@ -126,44 +134,44 @@ func (state *flogoState) Run(bind string, target string) error {
 	}
 	return nil
 }
-func (state *flogoState) handleEventBuilder(evt EventBuilder) {
+func (mgr *flogoStateManager) handleEventBuilder(evt EventBuilder) {
 	switch evt.Type {
 	case EventBuildFailure:
-		state.builderStatus = builderStatusFailed
-		state.lastBuildOutput = evt.Message
-		state.lastBuildSuccess = false
+		mgr.state.builderStatus = builderStatusFailed
+		mgr.state.lastBuildOutput = evt.Message
+		mgr.state.lastBuildSuccess = false
 	case EventBuildStart:
-		state.builderStatus = builderStatusCompiling
+		mgr.state.builderStatus = builderStatusCompiling
 	case EventBuildSuccess:
-		state.builderStatus = builderStatusOK
-		state.lastBuildOutput = evt.Message
-		state.lastBuildSuccess = true
-		state.chanRunnerRestart <- struct{}{}
+		mgr.state.builderStatus = builderStatusOK
+		mgr.state.lastBuildOutput = evt.Message
+		mgr.state.lastBuildSuccess = true
+		mgr.chanRunnerRestart <- struct{}{}
 	default:
 		log.Debug().Msg("build unknown")
 	}
 }
-func (state *flogoState) handleEventRunner(evt EventRunner) {
+func (mgr *flogoStateManager) handleEventRunner(evt EventRunner) {
 	switch evt.Type {
 	case EventRunnerStart:
-		state.runnerStatus = runnerStatusRunning
-		state.lastRunStdout = []byte{}
-		state.lastRunStderr = []byte{}
+		mgr.state.runnerStatus = runnerStatusRunning
+		mgr.state.lastRunStdout = []byte{}
+		mgr.state.lastRunStderr = []byte{}
 	case EventRunnerStopOK:
-		state.runnerStatus = runnerStatusStopOK
+		mgr.state.runnerStatus = runnerStatusStopOK
 	case EventRunnerStopErr:
-		state.runnerStatus = runnerStatusStopErr
+		mgr.state.runnerStatus = runnerStatusStopErr
 	case EventRunnerStdout:
-		state.lastRunStdout = evt.Buffer
+		mgr.state.lastRunStdout = evt.Buffer
 	case EventRunnerStderr:
-		state.lastRunStderr = evt.Buffer
+		mgr.state.lastRunStderr = evt.Buffer
 	case EventRunnerWaiting:
-		state.runnerStatus = runnerStatusStopErr
+		mgr.state.runnerStatus = runnerStatusStopErr
 	default:
 		log.Debug().Msg("runner unknown")
 	}
 }
-func (state *flogoState) handleEventUI(evt tcell.Event) {
+func (mgr *flogoStateManager) handleEventUI(evt tcell.Event) {
 	switch ev := evt.(type) {
 	case *tcell.EventClipboard:
 		log.Info().Msg("event clipboard")
@@ -175,7 +183,7 @@ func (state *flogoState) handleEventUI(evt tcell.Event) {
 		log.Info().Msg("event interrupt")
 	case *tcell.EventKey:
 		if ev.Key() == tcell.KeyCtrlC {
-			state.isRunning = false
+			mgr.isRunning = false
 		}
 		log.Info().Msg("event key")
 	case *tcell.EventMouse:

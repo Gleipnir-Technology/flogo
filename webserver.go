@@ -17,7 +17,16 @@ import (
 //go:embed index.html injector.js
 var embeddedFiles embed.FS
 
-func startServer(ctx context.Context, bind string, upstream url.URL) {
+type Webserver struct {
+	chanStateChange <-chan *flogoState
+}
+
+func NewWebserver(stateChange <-chan *flogoState) *Webserver {
+	return &Webserver{
+		chanStateChange: stateChange,
+	}
+}
+func (w *Webserver) Start(ctx context.Context, bind string, upstream url.URL) {
 	logger := log.Ctx(ctx)
 	r := chi.NewRouter()
 
