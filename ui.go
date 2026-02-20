@@ -16,13 +16,22 @@ type ui struct {
 	state  uiState
 	target string
 }
+type runnerStatus int
+
+const (
+	runnerStatusRunning runnerStatus = iota
+	runnerStatusStopOK
+	runnerStatusStopErr
+	runnerStatusWaiting
+)
+
 type uiState struct {
 	isCompiling      bool
-	isRunning        bool
 	lastBuildOutput  string
 	lastBuildSuccess bool
 	lastRunStdout    string
 	lastRunStderr    string
+	runnerStatus     runnerStatus
 }
 
 func newUI(target string) (*ui, error) {
@@ -38,9 +47,9 @@ func newUI(target string) (*ui, error) {
 		screen: screen,
 		state: uiState{
 			isCompiling:      false,
-			isRunning:        false,
 			lastBuildOutput:  "no output",
 			lastBuildSuccess: true,
+			runnerStatus:     runnerStatusWaiting,
 		},
 		target: target,
 	}, nil
@@ -121,10 +130,8 @@ func (u ui) drawUI() {
 		u.drawBuildFailure()
 	} else if u.state.isCompiling {
 		u.drawCompilation()
-	} else if u.state.isRunning {
-		u.drawRunning()
 	} else {
-		u.drawUnknown()
+		u.drawRunning()
 	}
 
 	u.screen.Show()
@@ -178,12 +185,16 @@ func (u ui) drawTitle() {
 		u.drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorGreen).Bold(true), "Idle")
 	}
 
-	if u.state.isRunning {
+	switch u.state.runnerStatus {
+	case runnerStatusRunning:
 		u.drawText(10, 0, tcell.StyleDefault.Foreground(tcell.ColorYellow).Bold(true), "Running")
-	} else {
-		u.drawText(10, 0, tcell.StyleDefault.Foreground(tcell.ColorRed).Bold(true), "Dead")
+	case runnerStatusStopErr:
+		u.drawText(10, 0, tcell.StyleDefault.Foreground(tcell.ColorRed).Bold(true), "Failed")
+	case runnerStatusStopOK:
+		u.drawText(10, 0, tcell.StyleDefault.Foreground(tcell.ColorGreen).Bold(true), "Exited")
+	case runnerStatusWaiting:
+		u.drawText(10, 0, tcell.StyleDefault.Foreground(tcell.ColorBlue).Bold(true), "Waiting...")
+	default:
+		u.drawText(10, 0, tcell.StyleDefault.Foreground(tcell.ColorPurple).Bold(true), "Unknown")
 	}
-}
-func (u ui) drawUnknown() {
-	u.drawStatus("Unknown.", tcell.StyleDefault.Foreground(tcell.ColorRed))
 }

@@ -137,15 +137,19 @@ func main() {
 		case evt := <-chan_runner_events:
 			switch evt.Type {
 			case EventRunnerStart:
-				u.state.isRunning = true
+				u.state.runnerStatus = runnerStatusRunning
 				u.state.lastRunStdout = ""
 				u.state.lastRunStderr = ""
-			case EventRunnerStop:
-				u.state.isRunning = false
+			case EventRunnerStopOK:
+				u.state.runnerStatus = runnerStatusStopOK
+			case EventRunnerStopErr:
+				u.state.runnerStatus = runnerStatusStopErr
 			case EventRunnerStdout:
 				u.state.lastRunStdout = evt.Message
 			case EventRunnerStderr:
 				u.state.lastRunStderr = evt.Message
+			case EventRunnerWaiting:
+				u.state.runnerStatus = runnerStatusStopErr
 			default:
 				log.Debug().Msg("runner unknown")
 			}

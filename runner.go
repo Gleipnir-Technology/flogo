@@ -15,9 +15,11 @@ type EventRunnerType int
 
 const (
 	EventRunnerStart EventRunnerType = iota
-	EventRunnerStop
+	EventRunnerStopOK
+	EventRunnerStopErr
 	EventRunnerStdout
 	EventRunnerStderr
+	EventRunnerWaiting
 )
 
 type EventRunner struct {
@@ -74,7 +76,7 @@ func (r *Runner) Restart(ctx context.Context, build_output string) {
 		logger.Info().Str("build_output", build_output).Msg("Build output doesn't exist")
 		r.OnEvent <- EventRunner{
 			Message: "",
-			Type:    EventRunnerStop,
+			Type:    EventRunnerWaiting,
 		}
 		return
 	}
@@ -128,12 +130,12 @@ func (r *Runner) Restart(ctx context.Context, build_output string) {
 	if e := cmd.Wait(); e != nil {
 		r.OnEvent <- EventRunner{
 			Message: e.Error(),
-			Type:    EventRunnerStop,
+			Type:    EventRunnerStopErr,
 		}
 	}
 	r.OnEvent <- EventRunner{
-		Message: "ok",
-		Type:    EventRunnerStop,
+		Message: "",
+		Type:    EventRunnerStopOK,
 	}
 	log.Debug().Msg("exiting runner restart")
 }
