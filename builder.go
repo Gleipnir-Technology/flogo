@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,15 +17,17 @@ type EventBuilderType int
 
 const (
 	EventBuildFailure EventBuilderType = iota
+	EventBuildOutput
 	EventBuildStart
 	EventBuildSuccess
 )
 
 type EventBuilder struct {
-	Message string
+	Process *stateProcess
 	Type    EventBuilderType
 }
 type Builder struct {
+	Parent
 	Debounce time.Duration
 	OnDeath  chan<- error
 	OnEvent  chan<- EventBuilder
@@ -48,67 +50,98 @@ func (b Builder) Run(ctx context.Context) {
 }
 
 // BuildProject builds the Go project
-func (b Builder) BuildProject(ctx context.Context) debouncedFunc {
+func (bld Builder) BuildProject(ctx context.Context) debouncedFunc {
 	return func() {
 		logger := log.Ctx(ctx)
 		cmd := exec.CommandContext(ctx, "go", "build", ".")
-		cmd.Dir = b.Target
+		cmd.Dir = bld.Target
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
 			logger.Error().Msg("no stderr")
-			b.onBuildFailure("no stderr")
+			bld.onBuildFailure(nil, []byte{}, []byte{})
 			return
 		}
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			logger.Error().Msg("no stdout")
-			b.onBuildFailure("no stdout")
+			bld.onBuildFailure(nil, []byte{}, []byte{})
 			return
 		}
 		err = cmd.Start()
 		if err != nil {
 			logger.Error().Msg("no start")
-			b.onBuildFailure(fmt.Sprintf("failed to start 'go build .' in %s: %+v", b.Target, err))
+			bld.onBuildFailure(nil, []byte{}, []byte(fmt.Sprintf("failed to start 'go build .' in %s: %+v", bld.Target, err)))
 			return
 		}
+		scanner := bufio.NewScanner(stdout)
+		go func() {
+			for scanner.Scan() {
+				b := scanner.Bytes()
+				bld.onStdout(b)
+			}
+		}()
+
+		// Read stderr line by line
+		stderrScanner := bufio.NewScanner(stderr)
+		go func() {
+			for stderrScanner.Scan() {
+				b := stderrScanner.Bytes()
+				bld.onStderr(b)
+			}
+		}()
+
 		logger.Info().Msg("Build start")
-		b.onBuildStart("go build .")
-		stderr_b, err := io.ReadAll(stderr)
-		if err != nil {
-			b.onBuildFailure(fmt.Sprintf("Failed to read stderr: %+v", err))
+		bld.onBuildStart("go build .")
+
+		if err = cmd.Wait(); err != nil {
+			if ex, ok := err.(*exec.ExitError); ok {
+				i := ex.ExitCode()
+				bld.onBuildFailure(&i, []byte{}, ex.Stderr)
+			} else {
+				bld.onBuildFailure(nil, []byte(err.Error()), []byte{})
+			}
 			return
 		}
-		stdout_b, err := io.ReadAll(stdout)
-		if err != nil {
-			b.onBuildFailure(fmt.Sprintf("Failed to read stdout: %+v", err))
-			return
-		}
-		err = cmd.Wait()
-		if err != nil {
-			b.onBuildFailure(string(stderr_b))
-			return
-		}
-		logger.Info().Bytes("stdout", stdout_b).Bytes("stderr", stderr_b).Msg("build complete")
-		b.onBuildSuccess(string(stdout_b))
+		//logger.Info().Bytes("stdout", stdout_b).Bytes("stderr", stderr_b).Msg("build complete")
+		bld.onBuildSuccess()
 	}
 }
 
-func (b Builder) onBuildFailure(f string) {
+func (b Builder) onBuildOutput(stdout []byte, stderr []byte) {
 	b.OnEvent <- EventBuilder{
-		Message: f,
-		Type:    EventBuildFailure,
+		Process: &stateProcess{
+			exitCode: nil,
+			stdout:   stdout,
+			stderr:   stderr,
+		},
+		Type: EventBuildOutput,
+	}
+}
+func (b Builder) onBuildFailure(exit_code *int, stdout []byte, stderr []byte) {
+	b.OnEvent <- EventBuilder{
+		Process: &stateProcess{
+			exitCode: exit_code,
+			stdout:   stdout,
+			stderr:   stderr,
+		},
+		Type: EventBuildFailure,
 	}
 }
 func (b Builder) onBuildStart(m string) {
 	b.OnEvent <- EventBuilder{
-		Message: m,
+		Process: nil,
 		Type:    EventBuildStart,
 	}
 }
-func (b Builder) onBuildSuccess(m string) {
+func (b Builder) onBuildSuccess() {
+	i := 0
 	b.OnEvent <- EventBuilder{
-		Message: m,
-		Type:    EventBuildSuccess,
+		Process: &stateProcess{
+			exitCode: &i,
+			stdout:   b.Stdout.Bytes(),
+			stderr:   b.Stderr.Bytes(),
+		},
+		Type: EventBuildSuccess,
 	}
 }
 func (b Builder) onError(err error) {

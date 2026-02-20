@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -25,19 +24,18 @@ const (
 )
 
 type EventRunner struct {
-	Buffer []byte
-	Type   EventRunnerType
+	Process *stateProcess
+	Type    EventRunnerType
 }
 type Runner struct {
+	Parent
+
 	DoRestart <-chan struct{}
 	OnDeath   chan<- error
 	OnEvent   chan<- EventRunner
 	Target    string
 
 	buildOutput string
-	child       *exec.Cmd
-	stdout      bytes.Buffer
-	stderr      bytes.Buffer
 }
 
 func (r *Runner) Run(ctx context.Context) {
@@ -53,103 +51,66 @@ func (r *Runner) Run(ctx context.Context) {
 	// Avoid infinite recursion when we self-host
 	if base == "flogo" {
 		logger.Info().Msg("Refusing to infinitely recurse on flogo")
-		r.OnEvent <- EventRunner{
-			Buffer: []byte(""),
-			Type:   EventRunnerStart,
-		}
-		r.OnEvent <- EventRunner{
-			Buffer: []byte("no recursing!"),
-			Type:   EventRunnerStdout,
-		}
+		r.onStart()
+		r.onStdout([]byte("no flogo recursing."))
 		return
 	}
 	logger.Info().Str("build", r.buildOutput).Msg("Build output")
 	chan_restart := make(chan struct{})
-	go r.parent(ctx, chan_restart)
+	go r.supervise(ctx, chan_restart)
 	for {
 		select {
 		case <-ctx.Done():
-			if r.child != nil {
-				r.child.Process.Signal(syscall.SIGINT)
+			if r.Child != nil {
+				r.Child.Process.Signal(syscall.SIGINT)
 			}
 			return
 		case <-r.DoRestart:
-			if r.child != nil {
-				r.child.Process.Signal(syscall.SIGINT)
+			if r.Child != nil {
+				r.Child.Process.Signal(syscall.SIGINT)
 			}
 			chan_restart <- struct{}{}
 		}
 	}
 }
 
-func (r *Runner) onStdout(b []byte) {
-	r.stdout.Write(b)
-	r.stdout.Write([]byte("\n"))
-	r.OnEvent <- EventRunner{
-		Buffer: r.stdout.Bytes(),
-		Type:   EventRunnerStdout,
-	}
-}
-func (r *Runner) onStderr(b []byte) {
-	r.stderr.Write(b)
-	r.stderr.Write([]byte("\n"))
-	r.OnEvent <- EventRunner{
-		Buffer: r.stderr.Bytes(),
-		Type:   EventRunnerStderr,
-	}
-}
-func (r *Runner) parent(ctx context.Context, chan_restart <-chan struct{}) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-chan_restart:
-			r.restart(ctx)
-		}
-	}
-}
 func (r *Runner) restart(ctx context.Context) {
 	logger := log.Ctx(ctx)
-	r.stdout.Reset()
-	r.stderr.Reset()
+	r.Stdout.Reset()
+	r.Stderr.Reset()
 	if _, err := os.Stat(r.buildOutput); os.IsNotExist(err) {
 		logger.Info().Str("build_output", r.buildOutput).Msg("Build output doesn't exist")
-		r.OnEvent <- EventRunner{
-			Buffer: []byte(""),
-			Type:   EventRunnerWaiting,
-		}
+		r.onStart()
+		r.onStdout([]byte("refusing flogo recursion"))
 		return
 	}
 	// Create the command
-	r.child = exec.Command(r.buildOutput)
-	r.child.Dir = r.Target
+	r.Child = exec.Command(r.buildOutput)
+	r.Child.Dir = r.Target
 
 	// Get a pipe for stdout
-	stdout, err := r.child.StdoutPipe()
+	stdout, err := r.Child.StdoutPipe()
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to get stdout pipe")
-		r.child = nil
+		r.Child = nil
 		return
 	}
 
-	// Optionally get stderr too
-	stderr, err := r.child.StderrPipe()
+	// get stderr too
+	stderr, err := r.Child.StderrPipe()
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to get stderr pipe")
-		r.child = nil
+		r.Child = nil
 		return
 	}
 
 	// Start the command (non-blocking)
-	if err := r.child.Start(); err != nil {
+	if err := r.Child.Start(); err != nil {
 		logger.Error().Err(err).Str("build_output", r.buildOutput).Msg("Failed to start")
-		r.child = nil
+		r.Child = nil
 		return
 	}
-	r.OnEvent <- EventRunner{
-		Buffer: []byte(""),
-		Type:   EventRunnerStart,
-	}
+	r.onStart()
 
 	// Read stdout line by line
 	scanner := bufio.NewScanner(stdout)
@@ -170,17 +131,53 @@ func (r *Runner) restart(ctx context.Context) {
 	}()
 
 	// Wait for the command to finish
-	if e := r.child.Wait(); e != nil {
-		r.OnEvent <- EventRunner{
-			Buffer: []byte(e.Error()),
-			Type:   EventRunnerStopErr,
+	if e := r.Child.Wait(); e != nil {
+		if ex, ok := err.(*exec.ExitError); ok {
+			i := ex.ExitCode()
+			r.onFailure(&i, []byte{}, ex.Stderr)
+		} else {
+			r.onFailure(nil, []byte(err.Error()), []byte{})
 		}
-		r.child = nil
+		r.Child = nil
 		return
 	}
-	r.OnEvent <- EventRunner{
-		Buffer: []byte(""),
-		Type:   EventRunnerStopOK,
+	r.onSuccess()
+	r.Child = nil
+}
+func (r *Runner) supervise(ctx context.Context, chan_restart <-chan struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-chan_restart:
+			r.restart(ctx)
+		}
 	}
-	r.child = nil
+}
+func (r *Runner) onFailure(exit_code *int, stdout []byte, stderr []byte) {
+	r.OnEvent <- EventRunner{
+		Process: &stateProcess{
+			exitCode: exit_code,
+			stdout:   stdout,
+			stderr:   stderr,
+		},
+		Type: EventRunnerStart,
+	}
+}
+func (r *Runner) onStart() {
+	r.OnEvent <- EventRunner{
+		Process: nil,
+		Type:    EventRunnerStart,
+	}
+}
+func (r *Runner) onSuccess() {
+	i := 0
+	r.OnEvent <- EventRunner{
+		Process: &stateProcess{
+			exitCode: &i,
+			stdout:   r.Stdout.Bytes(),
+			stderr:   r.Stderr.Bytes(),
+		},
+		Type: EventRunnerStopOK,
+	}
 }

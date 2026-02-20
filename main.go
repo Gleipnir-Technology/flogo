@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -13,6 +14,11 @@ import (
 
 func main() {
 	var err error
+	disable_tui := os.Getenv("DISABLE_TUI")
+	enable_tui := true
+	if disable_tui != "" {
+		enable_tui = false
+	}
 	var target = flag.String("target", ".", "The directory containing the go project to build")
 	flag.Parse()
 
@@ -51,9 +57,19 @@ func main() {
 	// Keep track of the state of everything
 	mgr := newFlogoStateManager()
 
-	err = mgr.Run(bind, *target)
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().
+				Str("panic", fmt.Sprintf("%v", r)).
+				Bytes("stack", debug.Stack()).
+				Msg("Application panicked")
+			// Also write to stderr file
+			fmt.Fprintf(os.Stderr, "PANIC: %v\n%s\n", r, debug.Stack())
+		}
+	}()
+	err = mgr.Run(bind, *target, enable_tui)
 	if err != nil {
-		fmt.Println("%+v", err)
+		fmt.Printf("%+v", err)
 		os.Exit(1)
 	}
 }
@@ -61,7 +77,11 @@ func reload() {
 	log.Info().Msg("fake reload")
 }
 func setupLogging(file *os.File) {
-	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	if os.Getenv("VERBOSE") != "" {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	} else {
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	}
 
 	// Track start time for delta timestamps
 	startTime := time.Now()

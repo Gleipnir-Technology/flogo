@@ -25,32 +25,49 @@ type MessageSSE struct {
 	Content interface{} `json:"content"`
 	Type    string      `json:"type"`
 }
+type MessageProcess struct {
+	ExitCode *int   `json:"exit_code"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+}
+
+func newMessageProcess(state *stateProcess) *MessageProcess {
+	if state == nil {
+		return nil
+	}
+	return &MessageProcess{
+		ExitCode: state.exitCode,
+		Stderr:   string(state.stderr),
+		Stdout:   string(state.stdout),
+	}
+}
+
 type MessageStatus struct {
-	Stdout string `json:"stdout"`
-	Stderr string `json:"stderr"`
-	Status string `json:"status"`
+	Status          string          `json:"status"`
+	ProcessCurrent  *MessageProcess `json:"current"`
+	ProcessPrevious *MessageProcess `json:"previous"`
 }
 type MessageState struct {
 	BuilderStatus MessageStatus `json:"builder"`
 	RunnerStatus  MessageStatus `json:"runner"`
 }
 type SSEConnection struct {
-	chanState chan *flogoState
+	chanState chan *stateFlogo
 	id        string
 }
 
-func (c *SSEConnection) SendState(w http.ResponseWriter, state *flogoState) error {
+func (c *SSEConnection) SendState(w http.ResponseWriter, state *stateFlogo) error {
 	return send(w, MessageSSE{
 		Content: MessageState{
 			BuilderStatus: MessageStatus{
-				Stdout: state.lastBuildOutput,
-				Stderr: "",
-				Status: StatusStringBuilder(state.builderStatus),
+				ProcessCurrent:  newMessageProcess(state.builder.buildCurrent),
+				ProcessPrevious: newMessageProcess(state.builder.buildPrevious),
+				Status:          StatusStringBuilder(state.builder.status),
 			},
 			RunnerStatus: MessageStatus{
-				Stdout: StripColorCodes(state.lastRunStdout),
-				Stderr: StripColorCodes(state.lastRunStderr),
-				Status: StatusStringRunner(state.runnerStatus),
+				ProcessCurrent:  newMessageProcess(state.runner.runCurrent),
+				ProcessPrevious: newMessageProcess(state.runner.runPrevious),
+				Status:          StatusStringRunner(state.runner.status),
 			},
 		},
 		Type: "state",
@@ -80,11 +97,11 @@ func send[T any](w http.ResponseWriter, msg T) error {
 }
 
 type Webserver struct {
-	chanStateChange <-chan *flogoState
+	chanStateChange <-chan *stateFlogo
 	connections     map[*SSEConnection]bool
 }
 
-func NewWebserver(stateChange <-chan *flogoState) *Webserver {
+func NewWebserver(stateChange <-chan *stateFlogo) *Webserver {
 	return &Webserver{
 		chanStateChange: stateChange,
 		connections:     make(map[*SSEConnection]bool, 0),
@@ -142,7 +159,7 @@ func (web *Webserver) sseHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	connection := SSEConnection{
-		chanState: make(chan *flogoState, 10),
+		chanState: make(chan *stateFlogo, 10),
 		id:        fmt.Sprintf("%d", time.Now().UnixNano()),
 	}
 	web.connections[&connection] = true

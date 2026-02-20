@@ -53,7 +53,7 @@ func (u ui) Run(ctx context.Context) {
 	// Clear screen
 	u.screen.Clear()
 }
-func (u ui) Redraw(state *flogoState) {
+func (u ui) Redraw(state *stateFlogo) {
 	if state == nil {
 		return
 	}
@@ -64,12 +64,10 @@ func (u ui) Redraw(state *flogoState) {
 	// Draw upstream info
 	//u.drawText(0, 1, tcell.StyleDefault.Foreground(color.Yellow), fmt.Sprintf("Upstream: %s", upstreamURL.String()))
 
-	if !state.lastBuildSuccess && state.lastBuildOutput != "" {
-		u.drawBuildFailure(state)
-	} else if state.builderStatus == builderStatusCompiling {
-		u.drawCompilation(state)
+	if state.builder.status != statusBuilderOK {
+		u.drawBuildStatus(state.builder)
 	} else {
-		u.drawRunning(state)
+		u.drawRunning(state.runner)
 	}
 
 	u.screen.Show()
@@ -78,11 +76,50 @@ func (u ui) Sync() {
 	u.screen.Sync()
 }
 
-func (u ui) drawBuildFailure(state *flogoState) {
-	u.drawStatus("Build errors:", tcell.StyleDefault.Foreground(color.Red))
+func (u ui) drawBuildStatus(state *stateBuilder) {
+	if state == nil {
+		return
+	}
+	style := tcell.StyleDefault.Foreground(color.White)
+	var content string
+	switch state.status {
+	case statusBuilderFailed:
+		style = tcell.StyleDefault.Foreground(color.Red)
+		if len(state.buildCurrent.stderr) > 0 {
+			content = string(state.buildCurrent.stderr)
+		} else if len(state.buildCurrent.stdout) > 0 {
+			content = string(state.buildCurrent.stdout)
+		} else if state.buildPrevious != nil {
+			if len(state.buildPrevious.stderr) > 0 {
+				content = string(state.buildPrevious.stderr)
+			} else if len(state.buildPrevious.stdout) > 0 {
+				content = string(state.buildPrevious.stdout)
+			} else {
+				content = "flogo: no output to show."
+			}
+		} else {
+			content = "flogo: no output to show."
+		}
+	case statusBuilderCompiling:
+		style = tcell.StyleDefault.Foreground(color.Yellow)
+		if state.buildCurrent == nil {
+			content = "flogo: no output yet"
+		} else if len(state.buildCurrent.stderr) > 0 {
+			content = string(state.buildCurrent.stderr)
+		} else if len(state.buildCurrent.stdout) > 0 {
+			content = string(state.buildCurrent.stdout)
+		} else {
+			content = "flogo: waiting..."
+		}
+	default:
+		style = tcell.StyleDefault.Foreground(color.Purple)
+		content = "flogo: programmer error (build)"
+	}
+	u.drawContent(content, style)
+}
 
-	// Split output into lines and display them
-	lines := strings.Split(state.lastBuildOutput, "\n")
+func (u ui) drawContent(content string, style tcell.Style) {
+	lines := strings.Split(content, "\n")
 	for i, line := range lines {
 		if i < 15 { // Limit number of lines to avoid overflow
 			u.drawText(1, 3+i, tcell.StyleDefault.Foreground(color.White), line)
@@ -92,19 +129,43 @@ func (u ui) drawBuildFailure(state *flogoState) {
 		}
 	}
 }
-func (u ui) drawCompilation(state *flogoState) {
+func (u ui) drawCompilation(state *stateFlogo) {
 	u.drawText(0, 1, tcell.StyleDefault.Foreground(color.Yellow), "Compiling...")
 }
-func (u ui) drawRunning(state *flogoState) {
+func (u ui) drawRunning(state *stateRunner) {
 	if state == nil {
 		return
 	}
-	if len(state.lastRunStderr) > 0 {
-		u.drawText(0, 1, tcell.StyleDefault.Foreground(color.Yellow), "stderr:")
-		u.drawBytesMultiline(0, 2, tcell.StyleDefault.Foreground(color.White), state.lastRunStderr)
-	} else if len(state.lastRunStdout) > 0 {
-		u.drawText(0, 1, tcell.StyleDefault.Foreground(color.Green), "stdout:")
-		u.drawBytesMultiline(0, 2, tcell.StyleDefault.Foreground(color.White), state.lastRunStdout)
+
+	switch state.status {
+	case statusRunnerRunning:
+		if state.runCurrent == nil {
+			u.drawText(0, 1, tcell.StyleDefault, "flogo: no content yet")
+		} else if len(state.runCurrent.stderr) > 0 {
+			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stderr)
+		} else if len(state.runCurrent.stdout) > 0 {
+			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stdout)
+		} else if state.runPrevious != nil {
+			u.drawText(0, 1, tcell.StyleDefault, "flogo: maybe use previous output...?")
+		} else {
+			u.drawText(0, 1, tcell.StyleDefault, "flogo: no output to show.")
+		}
+	case statusRunnerStopOK:
+		u.drawText(0, 1, tcell.StyleDefault, "flogo: stopped.")
+	case statusRunnerStopErr:
+		if len(state.runCurrent.stderr) > 0 {
+			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stderr)
+		} else if len(state.runCurrent.stdout) > 0 {
+			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stdout)
+		} else if state.runPrevious != nil {
+			u.drawText(0, 1, tcell.StyleDefault, "flogo: maybe use previous output...?")
+		} else {
+			u.drawText(0, 1, tcell.StyleDefault, "flogo: no output to show.")
+		}
+	case statusRunnerWaiting:
+		u.drawText(0, 1, tcell.StyleDefault, "flogo: waiting...")
+	default:
+		u.drawText(0, 1, tcell.StyleDefault.Foreground(color.Purple), "flogo: programmer error (run)")
 	}
 }
 func (u ui) drawStatus(status string, style tcell.Style) {
@@ -124,25 +185,26 @@ func (u ui) drawBytesMultiline(x, y int, style tcell.Style, buffer []byte) {
 	}
 	DrawStyledText(u.screen, x, y, text)
 }
-func (u ui) drawTitle(state *flogoState) {
-	if state.builderStatus == builderStatusCompiling {
+func (u ui) drawTitle(state *stateFlogo) {
+	switch state.builder.status {
+	case statusBuilderCompiling:
 		u.drawText(0, 0, tcell.StyleDefault.Foreground(color.Yellow).Bold(true), "Compiling")
-	} else if state.builderStatus == builderStatusFailed {
+	case statusBuilderFailed:
 		u.drawText(0, 0, tcell.StyleDefault.Foreground(color.Red).Bold(true), "Failed")
-	} else if state.builderStatus == builderStatusOK {
+	case statusBuilderOK:
 		u.drawText(0, 0, tcell.StyleDefault.Foreground(color.Green).Bold(true), "Idle")
-	} else {
+	default:
 		u.drawText(0, 0, tcell.StyleDefault.Foreground(color.Purple).Bold(true), "Unknown")
 	}
 
-	switch state.runnerStatus {
-	case runnerStatusRunning:
+	switch state.runner.status {
+	case statusRunnerRunning:
 		u.drawText(10, 0, tcell.StyleDefault.Foreground(color.Yellow).Bold(true), "Running")
-	case runnerStatusStopErr:
+	case statusRunnerStopErr:
 		u.drawText(10, 0, tcell.StyleDefault.Foreground(color.Red).Bold(true), "Failed")
-	case runnerStatusStopOK:
+	case statusRunnerStopOK:
 		u.drawText(10, 0, tcell.StyleDefault.Foreground(color.Green).Bold(true), "Exited")
-	case runnerStatusWaiting:
+	case statusRunnerWaiting:
 		u.drawText(10, 0, tcell.StyleDefault.Foreground(color.Blue).Bold(true), "Waiting...")
 	default:
 		u.drawText(10, 0, tcell.StyleDefault.Foreground(color.Purple).Bold(true), "Unknown")
