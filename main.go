@@ -61,13 +61,15 @@ func main() {
 	ctx, cancel := context.WithCancel(log.With().Logger().WithContext(context.Background()))
 	defer cancel()
 
-	// Create a channel where all the goroutines can signal death
-
+	// Create channels for goroutine comms
 	chan_to_build := make(chan struct{})
 	chan_builder_events := make(chan EventBuilder)
 	chan_runner_restart := make(chan struct{})
 	chan_runner_events := make(chan EventRunner)
 	something_died := make(chan error)
+
+	// Keep track of the state of everything
+	state := newFlogoState()
 
 	watcher := Watcher{
 		OnBuild: chan_to_build,
@@ -115,7 +117,7 @@ func main() {
 	is_running := true
 	var cause_of_death error
 	for is_running {
-		u.Sync()
+		u.Sync(&state)
 		select {
 		case cause_of_death := <-something_died:
 			log.Error().Err(cause_of_death).Msg("something died")
@@ -123,15 +125,15 @@ func main() {
 		case evt := <-chan_builder_events:
 			switch evt.Type {
 			case EventBuildFailure:
-				u.state.isCompiling = false
-				u.state.lastBuildOutput = evt.Message
-				u.state.lastBuildSuccess = false
+				state.builderStatus = builderStatusFailed
+				state.lastBuildOutput = evt.Message
+				state.lastBuildSuccess = false
 			case EventBuildStart:
-				u.state.isCompiling = true
+				state.builderStatus = builderStatusCompiling
 			case EventBuildSuccess:
-				u.state.isCompiling = false
-				u.state.lastBuildOutput = evt.Message
-				u.state.lastBuildSuccess = true
+				state.builderStatus = builderStatusOK
+				state.lastBuildOutput = evt.Message
+				state.lastBuildSuccess = true
 				chan_runner_restart <- struct{}{}
 			default:
 				log.Debug().Msg("build unknown")
@@ -139,19 +141,19 @@ func main() {
 		case evt := <-chan_runner_events:
 			switch evt.Type {
 			case EventRunnerStart:
-				u.state.runnerStatus = runnerStatusRunning
-				u.state.lastRunStdout = []byte{}
-				u.state.lastRunStderr = []byte{}
+				state.runnerStatus = runnerStatusRunning
+				state.lastRunStdout = []byte{}
+				state.lastRunStderr = []byte{}
 			case EventRunnerStopOK:
-				u.state.runnerStatus = runnerStatusStopOK
+				state.runnerStatus = runnerStatusStopOK
 			case EventRunnerStopErr:
-				u.state.runnerStatus = runnerStatusStopErr
+				state.runnerStatus = runnerStatusStopErr
 			case EventRunnerStdout:
-				u.state.lastRunStdout = evt.Buffer
+				state.lastRunStdout = evt.Buffer
 			case EventRunnerStderr:
-				u.state.lastRunStderr = evt.Buffer
+				state.lastRunStderr = evt.Buffer
 			case EventRunnerWaiting:
-				u.state.runnerStatus = runnerStatusStopErr
+				state.runnerStatus = runnerStatusStopErr
 			default:
 				log.Debug().Msg("runner unknown")
 			}

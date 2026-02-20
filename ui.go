@@ -14,26 +14,8 @@ import (
 
 type ui struct {
 	screen   tcell.Screen
-	state    uiState
 	target   string
 	upstream url.URL
-}
-type runnerStatus int
-
-const (
-	runnerStatusRunning runnerStatus = iota
-	runnerStatusStopOK
-	runnerStatusStopErr
-	runnerStatusWaiting
-)
-
-type uiState struct {
-	isCompiling      bool
-	lastBuildOutput  string
-	lastBuildSuccess bool
-	lastRunStdout    []byte
-	lastRunStderr    []byte
-	runnerStatus     runnerStatus
 }
 
 func newUI(target string, upstream url.URL) (*ui, error) {
@@ -46,13 +28,7 @@ func newUI(target string, upstream url.URL) (*ui, error) {
 	}
 	screen.Clear()
 	return &ui{
-		screen: screen,
-		state: uiState{
-			isCompiling:      false,
-			lastBuildOutput:  "no output",
-			lastBuildSuccess: true,
-			runnerStatus:     runnerStatusWaiting,
-		},
+		screen:   screen,
 		target:   target,
 		upstream: upstream,
 	}, nil
@@ -77,75 +53,33 @@ func (u ui) Run(ctx context.Context) {
 	// Clear screen
 	u.screen.Clear()
 }
-func (u ui) Sync() {
-	u.drawUI()
-}
-
-var (
-	isCompiling bool
-)
-
-func (u ui) handleInput() {
-	/*
-		ev := u.screen.PollEvent()
-		switch ev := ev.(type) {
-		case *tcell.EventKey:
-			if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
-				return
-			}
-		case *tcell.EventResize:
-			u.screen.Sync()
-		}
-	*/
-}
-func runUI(ctx context.Context) {
-	/*
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				uiMutex.Lock()
-				state := UIState{
-					isCompiling:      isCompiling,
-					lastBuildOutput:  lastBuildOutput,
-					lastBuildSuccess: lastBuildSuccess,
-				}
-				uiMutex.Unlock()
-
-				u.drawUI(state)
-			}
-		}
-	*/
-}
-
-func (u ui) drawUI() {
+func (u ui) Sync(state *flogoState) {
+	if state == nil {
+		return
+	}
 	u.screen.Clear()
 
 	// Draw title
-	u.drawTitle()
+	u.drawTitle(state)
 	// Draw upstream info
 	//u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorYellow), fmt.Sprintf("Upstream: %s", upstreamURL.String()))
 
-	if !u.state.lastBuildSuccess && u.state.lastBuildOutput != "" {
-		u.drawBuildFailure()
-	} else if u.state.isCompiling {
-		u.drawCompilation()
+	if !state.lastBuildSuccess && state.lastBuildOutput != "" {
+		u.drawBuildFailure(state)
+	} else if state.builderStatus == builderStatusCompiling {
+		u.drawCompilation(state)
 	} else {
-		u.drawRunning()
+		u.drawRunning(state)
 	}
 
 	u.screen.Show()
 }
 
-func (u ui) drawBuildFailure() {
+func (u ui) drawBuildFailure(state *flogoState) {
 	u.drawStatus("Build Failed. Errors:", tcell.StyleDefault.Foreground(tcell.ColorRed))
 
 	// Split output into lines and display them
-	lines := strings.Split(u.state.lastBuildOutput, "\n")
+	lines := strings.Split(state.lastBuildOutput, "\n")
 	for i, line := range lines {
 		if i < 15 { // Limit number of lines to avoid overflow
 			u.drawText(1, 3+i, tcell.StyleDefault.Foreground(tcell.ColorWhite), line)
@@ -155,18 +89,19 @@ func (u ui) drawBuildFailure() {
 		}
 	}
 }
-func (u ui) drawBytes(x, y int, buffer []byte) {
+func (u ui) drawCompilation(state *flogoState) {
+	u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorYellow), "Compiling...")
 }
-
-func (u ui) drawCompilation() {
-}
-func (u ui) drawRunning() {
-	if len(u.state.lastRunStderr) > 0 {
+func (u ui) drawRunning(state *flogoState) {
+	if state == nil {
+		return
+	}
+	if len(state.lastRunStderr) > 0 {
 		u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorYellow), "stderr:")
-		u.drawBytesMultiline(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStderr)
-	} else if len(u.state.lastRunStdout) > 0 {
+		u.drawBytesMultiline(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), state.lastRunStderr)
+	} else if len(state.lastRunStdout) > 0 {
 		u.drawText(0, 1, tcell.StyleDefault.Foreground(tcell.ColorGreen), "stdout:")
-		u.drawBytesMultiline(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), u.state.lastRunStdout)
+		u.drawBytesMultiline(0, 2, tcell.StyleDefault.Foreground(tcell.ColorWhite), state.lastRunStdout)
 	}
 }
 func (u ui) drawStatus(status string, style tcell.Style) {
@@ -186,14 +121,14 @@ func (u ui) drawBytesMultiline(x, y int, style tcell.Style, buffer []byte) {
 	}
 	DrawStyledText(u.screen, x, y, text)
 }
-func (u ui) drawTitle() {
-	if u.state.isCompiling {
+func (u ui) drawTitle(state *flogoState) {
+	if state.builderStatus == builderStatusCompiling {
 		u.drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorYellow).Bold(true), "Compiling")
 	} else {
 		u.drawText(0, 0, tcell.StyleDefault.Foreground(tcell.ColorGreen).Bold(true), "Idle")
 	}
 
-	switch u.state.runnerStatus {
+	switch state.runnerStatus {
 	case runnerStatusRunning:
 		u.drawText(10, 0, tcell.StyleDefault.Foreground(tcell.ColorYellow).Bold(true), "Running")
 	case runnerStatusStopErr:
