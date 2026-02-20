@@ -25,13 +25,14 @@ type MessageSSE struct {
 	Type string      `json:"type"`
 	Body interface{} `json:"message"`
 }
+type MessageStatus struct {
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+	Status string `json:"status"`
+}
 type MessageState struct {
-	BuilderStatus    string
-	LastBuildOutput  string
-	LastBuildSuccess bool
-	LastRunStdout    string
-	LastRunStderr    string
-	RunnerStatus     string `json:"status"`
+	BuilderStatus MessageStatus `json:"status_builder"`
+	RunnerStatus  MessageStatus `json:"status_runner"`
 }
 type SSEConnection struct {
 	chanState chan *flogoState
@@ -42,7 +43,16 @@ func (c *SSEConnection) SendState(w http.ResponseWriter, state *flogoState) erro
 	log.Debug().Msg("Send state")
 	return send(w, MessageSSE{
 		Body: MessageState{
-			RunnerStatus: "running",
+			BuilderStatus: MessageStatus{
+				Stdout: state.lastBuildOutput,
+				Stderr: "",
+				Status: StatusStringBuilder(state.builderStatus),
+			},
+			RunnerStatus: MessageStatus{
+				Stdout: StripColorCodes(state.lastRunStdout),
+				Stderr: StripColorCodes(state.lastRunStderr),
+				Status: StatusStringRunner(state.runnerStatus),
+			},
 		},
 		Type: "state",
 	})

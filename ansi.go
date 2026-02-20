@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
 	"github.com/leaanthony/go-ansi-parser"
@@ -30,6 +32,13 @@ func ParseANSI(buf []byte) ([]*ansi.StyledText, error) {
 	return ansi.Parse(string(buf))
 }
 
+func StripColorCodes(buf []byte) string {
+	result, err := ansi.Cleanse(string(buf), ansi.WithIgnoreInvalidCodes())
+	if err != nil {
+		return fmt.Sprintf("Failed to strip color codes: %v", err)
+	}
+	return result
+}
 func convertStyle(t *ansi.StyledText) tcell.Style {
 	style := tcell.StyleDefault
 	if t == nil {

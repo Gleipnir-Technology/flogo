@@ -37,6 +37,18 @@ const (
 	builderStatusOK
 )
 
+func StatusStringBuilder(s builderStatus) string {
+	switch s {
+	case builderStatusCompiling:
+		return "compiling"
+	case builderStatusFailed:
+		return "failed"
+	case builderStatusOK:
+		return "ok"
+	}
+	return "unknown"
+}
+
 type runnerStatus int
 
 const (
@@ -45,6 +57,20 @@ const (
 	runnerStatusStopErr
 	runnerStatusWaiting
 )
+
+func StatusStringRunner(s runnerStatus) string {
+	switch s {
+	case runnerStatusRunning:
+		return "running"
+	case runnerStatusStopOK:
+		return "ok"
+	case runnerStatusStopErr:
+		return "error"
+	case runnerStatusWaiting:
+		return "waiting"
+	}
+	return "unknown"
+}
 
 func newFlogoStateManager() flogoStateManager {
 	return flogoStateManager{
