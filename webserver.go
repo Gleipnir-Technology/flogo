@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
@@ -17,14 +18,56 @@ import (
 //go:embed index.html injector.js
 var embeddedFiles embed.FS
 
+type MessageHeartbeat struct {
+	Time time.Time `json:"time"`
+}
+type MessageSSE struct {
+	Type string      `json:"type"`
+	Body interface{} `json:"message"`
+}
+type MessageState struct {
+	BuilderStatus    string
+	LastBuildOutput  string
+	LastBuildSuccess bool
+	LastRunStdout    string
+	LastRunStderr    string
+	RunnerStatus     string `json:"status"`
+}
 type SSEConnection struct {
 	chanState chan *flogoState
 	id        string
 }
 
-func (c *SSEConnection) push(w http.ResponseWriter, state *flogoState) {
-	fmt.Fprintf(w, "data: {\"state\": {}, \"time\": \"%s\"}\n\n", time.Now().Format(time.RFC3339))
+func (c *SSEConnection) SendState(w http.ResponseWriter, state *flogoState) error {
+	log.Debug().Msg("Send state")
+	return send(w, MessageSSE{
+		Body: MessageState{
+			RunnerStatus: "running",
+		},
+		Type: "state",
+	})
+}
+func (c *SSEConnection) SendHeartbeat(w http.ResponseWriter, t time.Time) error {
+	return send(w, MessageSSE{
+		Body: MessageHeartbeat{
+			Time: t,
+		},
+		Type: "heartbeat",
+	})
+}
+func send[T any](w http.ResponseWriter, msg T) error {
+	jsonData, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshaling json: %w", err)
+	}
+	// Write in SSE format: "data: <json>\n\n"
+	_, err = fmt.Fprintf(w, "data: %s\n\n", jsonData)
+	if err != nil {
+		return fmt.Errorf("writing SSE message: %w", err)
+	}
+
 	w.(http.Flusher).Flush()
+	return nil
 }
 
 type Webserver struct {
@@ -106,17 +149,21 @@ func (web *Webserver) sseHandler(w http.ResponseWriter, r *http.Request) {
 	done := r.Context().Done()
 
 	// Keep connection open until client disconnects
+	var err error
 	for {
+		err = nil
 		select {
 		case <-done:
 			log.Info().Msg("Client closed connection")
 			return
 		case t := <-ticker.C:
 			// Send a heartbeat message
-			fmt.Fprintf(w, "data: {\"heartbeat\": \"%s\"}\n\n", t.Format(time.RFC3339))
-			w.(http.Flusher).Flush()
+			err = connection.SendHeartbeat(w, t)
 		case state := <-connection.chanState:
-			connection.push(w, state)
+			err = connection.SendState(w, state)
+		}
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to send state from webserver")
 		}
 	}
 }
