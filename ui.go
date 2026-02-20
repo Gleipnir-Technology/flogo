@@ -85,7 +85,9 @@ func (u ui) drawBuildStatus(state *stateBuilder) {
 	switch state.status {
 	case statusBuilderFailed:
 		style = tcell.StyleDefault.Foreground(color.Red)
-		if len(state.buildCurrent.stderr) > 0 {
+		if state.buildCurrent == nil {
+			content = string("flogo: no build data")
+		} else if len(state.buildCurrent.stderr) > 0 {
 			content = string(state.buildCurrent.stderr)
 		} else if len(state.buildCurrent.stdout) > 0 {
 			content = string(state.buildCurrent.stdout)
