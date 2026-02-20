@@ -185,6 +185,8 @@ func (mgr *flogoStateManager) handleEventUI(evt tcell.Event) {
 	case *tcell.EventKey:
 		if ev.Key() == tcell.KeyCtrlC {
 			mgr.isRunning = false
+		} else {
+			mgr.updateWebserver()
 		}
 		log.Info().Msg("event key")
 	case *tcell.EventMouse:
