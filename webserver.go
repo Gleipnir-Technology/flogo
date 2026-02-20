@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"fmt"
@@ -31,28 +32,39 @@ func startServer(ctx context.Context, bind string, upstream url.URL) {
 	// Store the original response modifier
 	originalModifyResponse := proxy.ModifyResponse
 
+	/*
+		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) {
+			logger.Warn().Err(e).Msg("proxy upstream failure")
+		}
+	*/
 	// Add our JavaScript injection logic
 	proxy.ModifyResponse = func(resp *http.Response) error {
+		logger.Debug().Msg("modifying")
 		// Call the original modifier if it exists
 		if originalModifyResponse != nil {
 			if err := originalModifyResponse(resp); err != nil {
 				logger.Info().Err(err).Msg("failed to modify response")
 				return err
+			} else {
+				logger.Debug().Msg("modified")
 			}
 		}
 
 		// Only inject JavaScript into HTML responses
 		contentType := resp.Header.Get("Content-Type")
 		if !strings.Contains(strings.ToLower(contentType), "text/html") {
+			logger.Debug().Msg("No 'text/html' in content type")
 			return nil
 		}
 
 		// Read the original body
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
+			logger.Error().Err(err).Msg("Failed to read all of the body")
 			return err
 		}
 		resp.Body.Close()
+		log.Debug().Bytes("body", body).Msg("Got body")
 
 		// Inject the JavaScript alert
 		scriptTag := "<script>alert('hello world');</script>"
@@ -69,8 +81,8 @@ func startServer(ctx context.Context, bind string, upstream url.URL) {
 
 		// Update content length and body
 		resp.ContentLength = int64(len(bodyStr))
-		resp.Body = io.NopCloser(strings.NewReader(bodyStr))
-
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		logger.Debug().Int64("len", resp.ContentLength).Msg("response complete")
 		return nil
 	}
 
