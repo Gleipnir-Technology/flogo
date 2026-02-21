@@ -16,9 +16,17 @@ func main() {
 	process.Start(ctx)
 	count := 0
 	timer := time.After(5 * time.Second)
+	sub_exit := process.OnExit.Subscribe()
+	sub_start := process.OnStart.Subscribe()
+	sub_stderr := process.OnStderr.Subscribe()
+	sub_stdout := process.OnStdout.Subscribe()
+	defer sub_exit.Close()
+	defer sub_start.Close()
+	defer sub_stderr.Close()
+	defer sub_stdout.Close()
 	for {
 		select {
-		case <-process.OnExit():
+		case <-sub_exit.C:
 			fmt.Println("Child exited")
 			process.Start(ctx)
 			if count < 3 {
@@ -26,11 +34,11 @@ func main() {
 			} else {
 				os.Exit(0)
 			}
-		case <-process.OnStart():
+		case <-sub_start.C:
 			fmt.Println("Child started")
-		case b := <-process.OnStderr():
+		case b := <-sub_stderr.C:
 			fmt.Printf("child stderr: %s\n", string(b))
-		case b := <-process.OnStdout():
+		case b := <-sub_stdout.C:
 			fmt.Printf("child stdout: %s\n", string(b))
 		case <-timer:
 			fmt.Printf("timer elapsed, count %d\n", count)
