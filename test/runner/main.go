@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/Gleipnir-Technology/flogo/process"
@@ -28,12 +27,6 @@ func main() {
 		select {
 		case <-sub_exit.C:
 			fmt.Println("Child exited")
-			process.Start(ctx)
-			if count < 3 {
-				count = count + 1
-			} else {
-				os.Exit(0)
-			}
 		case <-sub_start.C:
 			fmt.Println("Child started")
 		case b := <-sub_stderr.C:
@@ -42,7 +35,7 @@ func main() {
 			fmt.Printf("child stdout: %s\n", string(b))
 		case <-timer:
 			fmt.Printf("timer elapsed, count %d\n", count)
-			process.SignalInterrupt()
+			process.Restart(ctx)
 			timer = time.After(5 * time.Second)
 		}
 	}
