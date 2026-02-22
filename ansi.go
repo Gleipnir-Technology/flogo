@@ -2,25 +2,29 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
 	"github.com/leaanthony/go-ansi-parser"
-	//"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog/log"
 )
 
 // DrawStyledText renders styled segments to the tcell screen
-func DrawStyledText(s tcell.Screen, x, y int, text []*ansi.StyledText) {
-	col := x
-	row := y
+func DrawStyledText(s tcell.Screen, start_x, start_y int, text []*ansi.StyledText) {
+	col := start_x
+	row := start_y
+	max_x, _ := s.Size()
 	for _, seg := range text {
 		style := convertStyle(seg)
 		for _, r := range seg.Label {
 			s.SetContent(col, row, r, nil, style)
 			col++
 			if r == '\n' {
-
-				col = x
+				col = start_x
+				row = row + 1
+			} else if col > max_x {
+				col = start_x
 				row = row + 1
 			}
 		}
@@ -45,18 +49,10 @@ func convertStyle(t *ansi.StyledText) tcell.Style {
 		return style
 	}
 	if t.FgCol != nil {
-		style = style.Foreground(color.NewRGBColor(
-			int32(t.FgCol.Rgb.R),
-			int32(t.FgCol.Rgb.G),
-			int32(t.FgCol.Rgb.B),
-		))
+		style = style.Foreground(convertStyleColor(style, t.FgCol))
 	}
 	if t.BgCol != nil {
-		style = style.Background(color.NewRGBColor(
-			int32(t.BgCol.Rgb.R),
-			int32(t.BgCol.Rgb.G),
-			int32(t.BgCol.Rgb.B),
-		))
+		style = style.Background(convertStyleColor(style, t.BgCol))
 	}
 	if t.Blinking() {
 		style = style.Blink(true)
@@ -80,4 +76,23 @@ func convertStyle(t *ansi.StyledText) tcell.Style {
 		style = style.Underline(true)
 	}
 	return style
+}
+func convertStyleColor(style tcell.Style, c *ansi.Col) color.Color {
+	result := color.GetColor(strings.ToLower(c.Name))
+	if result.Valid() {
+		return result
+	}
+	log.Debug().
+		Int("id", c.Id).
+		Str("hex", c.Hex).
+		Uint("r", uint(c.Rgb.R)).
+		Uint("g", uint(c.Rgb.G)).
+		Uint("b", uint(c.Rgb.B)).
+		Str("name", c.Name).
+		Msg("color fallback")
+	return color.NewRGBColor(
+		int32(c.Rgb.R),
+		int32(c.Rgb.G),
+		int32(c.Rgb.B),
+	)
 }
