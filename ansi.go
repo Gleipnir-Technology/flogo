@@ -52,8 +52,8 @@ func DrawStyledText(s tcell.Screen, x_start, y_start int, lines [][]*ansi.Styled
 func fitToScreen(start_x, start_y, max_x, max_y int, parsed []*ansi.StyledText) ([][]*ansi.StyledText, error) {
 	lines := make([][]*ansi.StyledText, 0)
 	current_line := make([]*ansi.StyledText, 0)
+	cur_label := strings.Builder{}
 	for _, section := range parsed {
-		cur_label := strings.Builder{}
 		i := start_x
 		for _, r := range section.Label {
 			if r == '\n' || i > max_x {
