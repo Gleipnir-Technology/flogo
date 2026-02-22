@@ -9,37 +9,46 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 type Process struct {
 	// Contains the exit code after the program exits
 	ExitCode *int
+	OnStderr *SubscriptionManager[[]byte]
+	OnStdout *SubscriptionManager[[]byte]
+	OnExit   *SubscriptionManager[*os.ProcessState]
+	OnStart  *SubscriptionManager[struct{}]
 	// Contains all of stdeer that has been emitted by this process
 	Stderr bytes.Buffer
 	// Contains all of stdout that has been emitted by this process
 	Stdout bytes.Buffer
 
-	args     []string
-	cmd      *exec.Cmd
-	onExit   chan *os.ProcessState
-	onStart  chan struct{}
-	onStderr chan []byte
-	onStdout chan []byte
-	target   string
+	args       []string
+	chanExit   chan *os.ProcessState
+	chanStart  chan struct{}
+	chanStderr chan []byte
+	chanStdout chan []byte
+	cmd        *exec.Cmd
+	target     string
 }
 
 func New(target string, args ...string) *Process {
 	return &Process{
-		ExitCode: nil,
-		Stdout:   bytes.Buffer{},
-		Stderr:   bytes.Buffer{},
-		args:     args,
-		cmd:      nil,
-		onExit:   make(chan *os.ProcessState, 1),
-		onStart:  make(chan struct{}, 1),
-		onStderr: make(chan []byte, 10),
-		onStdout: make(chan []byte, 10),
-		target:   target,
+		ExitCode:   nil,
+		OnStderr:   NewSubscriptionManager[[]byte](),
+		OnStdout:   NewSubscriptionManager[[]byte](),
+		OnExit:     NewSubscriptionManager[*os.ProcessState](),
+		OnStart:    NewSubscriptionManager[struct{}](),
+		Stdout:     bytes.Buffer{},
+		Stderr:     bytes.Buffer{},
+		args:       args,
+		chanExit:   make(chan *os.ProcessState, 1),
+		chanStart:  make(chan struct{}, 1),
+		chanStderr: make(chan []byte, 10),
+		chanStdout: make(chan []byte, 10),
+		cmd:        nil,
+		target:     target,
 	}
 }
 
@@ -48,10 +57,8 @@ func New(target string, args ...string) *Process {
 // then calls "Start"
 // Provides an error if the process is already running
 func (p *Process) Restart(ctx context.Context) error {
-	if p.cmd != nil {
-		p.SignalInterrupt()
-	}
-	return nil
+	p.Stop()
+	return p.Start(ctx)
 }
 func (p *Process) Signal(s syscall.Signal) error {
 	if p.cmd == nil {
@@ -96,8 +103,7 @@ func (p *Process) Start(ctx context.Context) error {
 	go func() {
 		for scanner.Scan() {
 			b := scanner.Bytes()
-			//fmt.Printf("stdout: %s\n", string(b))
-			p.onStdout <- b
+			p.onStream(p.OnStdout, &p.Stdout, p.chanStdout, b)
 		}
 	}()
 
@@ -105,9 +111,8 @@ func (p *Process) Start(ctx context.Context) error {
 	stderrScanner := bufio.NewScanner(stderr)
 	go func() {
 		for stderrScanner.Scan() {
-			b := stderrScanner.Bytes()
-			//fmt.Printf("stderr: %s\n", string(b))
-			p.onStderr <- b
+			b := scanner.Bytes()
+			p.onStream(p.OnStderr, &p.Stderr, p.chanStderr, b)
 		}
 	}()
 
@@ -117,21 +122,41 @@ func (p *Process) Start(ctx context.Context) error {
 		if err != nil {
 			fmt.Printf("Got error on cmd.Wait(): %v\n", err)
 		}
-		p.onExit <- s
+		select {
+		case p.chanExit <- s:
+		default:
+		}
+		p.OnExit.Publish(s)
 		p.cmd = nil
 	}()
-	p.onStart <- struct{}{}
+	select {
+	case p.chanStart <- struct{}{}:
+	default:
+	}
+	p.OnStart.Publish(struct{}{})
 	return nil
 }
-func (p *Process) OnStart() <-chan struct{} {
-	return p.onStart
+
+// Signal the process to stop. Wait for it to complete, or for 3 seconds to pass, then
+// actively kill. This function does not return until the child is dead
+func (p *Process) Stop() {
+	if p.cmd != nil {
+		p.SignalInterrupt()
+	}
+	select {
+	case <-p.chanExit:
+	case <-time.After(time.Second * 3):
+		if p.cmd != nil {
+			p.Signal(syscall.SIGKILL)
+		}
+	}
 }
-func (p *Process) OnExit() <-chan *os.ProcessState {
-	return p.onExit
-}
-func (p *Process) OnStderr() <-chan []byte {
-	return p.onStderr
-}
-func (p *Process) OnStdout() <-chan []byte {
-	return p.onStdout
+func (p *Process) onStream(mgr *SubscriptionManager[[]byte], buf *bytes.Buffer, c chan<- []byte, b []byte) {
+	buf.Write(b)
+	buf.Write([]byte("\n"))
+	select {
+	case c <- b:
+	default:
+	}
+	mgr.Publish(b)
 }

@@ -1,14 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"syscall"
 
+	"github.com/Gleipnir-Technology/flogo/process"
 	"github.com/rs/zerolog/log"
 )
 
@@ -34,126 +31,55 @@ type Runner struct {
 	OnDeath   chan<- error
 	OnEvent   chan<- EventRunner
 	Target    string
-
-	buildOutput string
 }
 
-func (r *Runner) Run(ctx context.Context) {
+func (r *Runner) Run(ctx context.Context) error {
 	logger := log.Ctx(ctx)
-	var err error
-	r.buildOutput, err = determineBuildOutputAbs(r.Target)
+	build_output, err := determineBuildOutputAbs(r.Target)
 	if err != nil {
-		logger.Warn().Err(err).Msg("failed to determine build output name")
-		r.OnDeath <- fmt.Errorf("Failed to determine build output name")
-		return
+		return fmt.Errorf("Failed to determine build output name: %v", err)
 	}
-	base := filepath.Base(r.buildOutput)
+	base := filepath.Base(build_output)
 	// Avoid infinite recursion when we self-host
 	if base == "flogo" {
 		logger.Info().Msg("Refusing to infinitely recurse on flogo")
 		r.onStart()
 		r.onStdout([]byte("no flogo recursing."))
-		return
+		return nil
 	}
-	logger.Info().Str("build", r.buildOutput).Msg("Build output")
-	chan_restart := make(chan struct{})
-	go r.supervise(ctx, chan_restart)
+	logger.Info().Str("target", build_output).Msg("Build output")
+	p := process.New(build_output)
+	sub_exit := p.OnExit.Subscribe()
+	sub_start := p.OnStart.Subscribe()
+	sub_stderr := p.OnStderr.Subscribe()
+	sub_stdout := p.OnStdout.Subscribe()
+	defer sub_exit.Close()
+	defer sub_start.Close()
+	defer sub_stderr.Close()
+	defer sub_stdout.Close()
 	for {
 		select {
 		case <-ctx.Done():
-			if r.Child != nil {
-				r.Child.Process.Signal(syscall.SIGINT)
-			}
-			return
+			log.Info().Msg("Context done, exiting runner")
+			p.SignalInterrupt()
+			return ctx.Err()
+		case <-sub_exit.C:
+			log.Info().Msg("Runner's process exited")
+		case <-sub_start.C:
+			log.Info().Msg("Runner's process started")
+		case <-sub_stderr.C:
+		case <-sub_stdout.C:
 		case <-r.DoRestart:
-			if r.Child != nil {
-				r.Child.Process.Signal(syscall.SIGINT)
+			log.Info().Msg("Restart signal received, restarting process...")
+			err := p.Restart(ctx)
+			if err != nil {
+				r.OnDeath <- fmt.Errorf("runner restart err: %w", err)
+				return nil
 			}
-			chan_restart <- struct{}{}
 		}
 	}
 }
 
-func (r *Runner) restart(ctx context.Context) {
-	logger := log.Ctx(ctx)
-	r.Stdout.Reset()
-	r.Stderr.Reset()
-	if _, err := os.Stat(r.buildOutput); os.IsNotExist(err) {
-		logger.Info().Str("build_output", r.buildOutput).Msg("Build output doesn't exist")
-		r.onStart()
-		r.onStdout([]byte("refusing flogo recursion"))
-		return
-	}
-	// Create the command
-	r.Child = exec.Command(r.buildOutput)
-	r.Child.Dir = r.Target
-
-	// Get a pipe for stdout
-	stdout, err := r.Child.StdoutPipe()
-	if err != nil {
-		logger.Error().Err(err).Msg("Failed to get stdout pipe")
-		r.Child = nil
-		return
-	}
-
-	// get stderr too
-	stderr, err := r.Child.StderrPipe()
-	if err != nil {
-		logger.Error().Err(err).Msg("Failed to get stderr pipe")
-		r.Child = nil
-		return
-	}
-
-	// Start the command (non-blocking)
-	if err := r.Child.Start(); err != nil {
-		logger.Error().Err(err).Str("build_output", r.buildOutput).Msg("Failed to start")
-		r.Child = nil
-		return
-	}
-	r.onStart()
-
-	// Read stdout line by line
-	scanner := bufio.NewScanner(stdout)
-	go func() {
-		for scanner.Scan() {
-			b := scanner.Bytes()
-			r.onStdout(b)
-		}
-	}()
-
-	// Read stderr line by line
-	stderrScanner := bufio.NewScanner(stderr)
-	go func() {
-		for stderrScanner.Scan() {
-			b := stderrScanner.Bytes()
-			r.onStderr(b)
-		}
-	}()
-
-	// Wait for the command to finish
-	if e := r.Child.Wait(); e != nil {
-		if ex, ok := err.(*exec.ExitError); ok {
-			i := ex.ExitCode()
-			r.onFailure(&i, []byte{}, ex.Stderr)
-		} else {
-			r.onFailure(nil, []byte(err.Error()), []byte{})
-		}
-		r.Child = nil
-		return
-	}
-	r.onSuccess()
-	r.Child = nil
-}
-func (r *Runner) supervise(ctx context.Context, chan_restart <-chan struct{}) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-chan_restart:
-			r.restart(ctx)
-		}
-	}
-}
 func (r *Runner) onFailure(exit_code *int, stdout []byte, stderr []byte) {
 	r.OnEvent <- EventRunner{
 		Process: &stateProcess{
@@ -179,5 +105,11 @@ func (r *Runner) onSuccess() {
 			stderr:   r.Stderr.Bytes(),
 		},
 		Type: EventRunnerStopOK,
+	}
+}
+func (r *Runner) onWaiting() {
+	r.OnEvent <- EventRunner{
+		Process: nil,
+		Type:    EventRunnerWaiting,
 	}
 }

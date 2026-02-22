@@ -136,7 +136,12 @@ func (mgr *flogoStateManager) Run(bind string, target string, enable_tui bool) e
 		OnEvent:   mgr.chanRunnerEvents,
 		Target:    target,
 	}
-	go runner.Run(ctx)
+	go func() {
+		err := runner.Run(ctx)
+		if err != nil {
+			mgr.chanSomethingDied <- err
+		}
+	}()
 
 	// Start the UI in a goroutine
 

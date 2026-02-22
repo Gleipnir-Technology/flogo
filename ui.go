@@ -142,20 +142,22 @@ func (u ui) drawRunning(state *stateRunner) {
 	switch state.status {
 	case statusRunnerRunning:
 		if state.runCurrent == nil {
-			u.drawText(0, 1, tcell.StyleDefault, "flogo: no content yet")
+			u.drawText(0, 1, tcell.StyleDefault, "flogo: no runCurrent.")
 		} else if len(state.runCurrent.stderr) > 0 {
 			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stderr)
 		} else if len(state.runCurrent.stdout) > 0 {
 			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stdout)
-		} else if state.runPrevious != nil {
-			u.drawText(0, 1, tcell.StyleDefault, "flogo: maybe use previous output...?")
+		} else if state.runPrevious == nil {
+			u.drawText(0, 1, tcell.StyleDefault, "flogo: no runPrevious.")
 		} else {
-			u.drawText(0, 1, tcell.StyleDefault, "flogo: no output to show.")
+			u.drawText(0, 1, tcell.StyleDefault, "flogo: maybe use previous output...?")
 		}
 	case statusRunnerStopOK:
 		u.drawText(0, 1, tcell.StyleDefault, "flogo: stopped.")
 	case statusRunnerStopErr:
-		if len(state.runCurrent.stderr) > 0 {
+		if state.runCurrent == nil {
+			u.drawText(0, 1, tcell.StyleDefault, "flogo: no runCurrent")
+		} else if len(state.runCurrent.stderr) > 0 {
 			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stderr)
 		} else if len(state.runCurrent.stdout) > 0 {
 			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stdout)
