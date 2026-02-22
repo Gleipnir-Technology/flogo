@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/Gleipnir-Technology/flogo/process"
@@ -12,11 +13,10 @@ import (
 type EventRunnerType int
 
 const (
-	EventRunnerStart EventRunnerType = iota
+	EventRunnerOutput EventRunnerType = iota
+	EventRunnerStart
 	EventRunnerStopOK
 	EventRunnerStopErr
-	EventRunnerStdout
-	EventRunnerStderr
 	EventRunnerWaiting
 )
 
@@ -63,12 +63,18 @@ func (r *Runner) Run(ctx context.Context) error {
 			log.Info().Msg("Context done, exiting runner")
 			p.SignalInterrupt()
 			return ctx.Err()
-		case <-sub_exit.C:
+		case status := <-sub_exit.C:
 			log.Info().Msg("Runner's process exited")
+			r.onExit(p, status)
 		case <-sub_start.C:
 			log.Info().Msg("Runner's process started")
-		case <-sub_stderr.C:
-		case <-sub_stdout.C:
+			r.onStart()
+		case b := <-sub_stderr.C:
+			log.Debug().Bytes("b", b).Msg("subprocess stderr")
+			r.onOutput(p)
+		case b := <-sub_stdout.C:
+			log.Debug().Bytes("b", b).Msg("subprocess stdout")
+			r.onOutput(p)
 		case <-r.DoRestart:
 			log.Info().Msg("Restart signal received, restarting process...")
 			err := p.Restart(ctx)
@@ -80,31 +86,37 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-func (r *Runner) onFailure(exit_code *int, stdout []byte, stderr []byte) {
+func (r *Runner) onExit(p *process.Process, state *os.ProcessState) {
+	var t EventRunnerType
+	i := state.ExitCode()
+	if i == 0 {
+		t = EventRunnerStopOK
+	} else {
+		t = EventRunnerStopErr
+	}
 	r.OnEvent <- EventRunner{
 		Process: &stateProcess{
-			exitCode: exit_code,
-			stdout:   stdout,
-			stderr:   stderr,
+			exitCode: &i,
+			stderr:   p.Stderr.Bytes(),
+			stdout:   p.Stdout.Bytes(),
 		},
-		Type: EventRunnerStart,
+		Type: t,
+	}
+}
+func (r *Runner) onOutput(p *process.Process) {
+	r.OnEvent <- EventRunner{
+		Process: &stateProcess{
+			exitCode: nil,
+			stderr:   p.Stderr.Bytes(),
+			stdout:   p.Stdout.Bytes(),
+		},
+		Type: EventRunnerOutput,
 	}
 }
 func (r *Runner) onStart() {
 	r.OnEvent <- EventRunner{
 		Process: nil,
 		Type:    EventRunnerStart,
-	}
-}
-func (r *Runner) onSuccess() {
-	i := 0
-	r.OnEvent <- EventRunner{
-		Process: &stateProcess{
-			exitCode: &i,
-			stdout:   r.Stdout.Bytes(),
-			stderr:   r.Stderr.Bytes(),
-		},
-		Type: EventRunnerStopOK,
 	}
 }
 func (r *Runner) onWaiting() {

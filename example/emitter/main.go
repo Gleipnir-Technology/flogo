@@ -23,7 +23,11 @@ func main() {
 		select {
 		case <-ticker.C:
 			counter++
-			fmt.Printf("Counter: %d\n", counter)
+			if counter%2 == 0 {
+				fmt.Printf("Counter: out %d\n", counter)
+			} else {
+				fmt.Fprintf(os.Stderr, "Counter: err %d\n", counter)
+			}
 
 		case <-sigChan:
 			fmt.Println("Received SIGINT, shutting down...")

@@ -16,8 +16,8 @@ type stateFlogo struct {
 }
 type stateProcess struct {
 	exitCode *int
-	stdout   []byte
 	stderr   []byte
+	stdout   []byte
 }
 type stateBuilder struct {
 	buildPrevious *stateProcess
@@ -210,6 +210,9 @@ func (mgr *flogoStateManager) handleEventBuilder(evt EventBuilder) {
 }
 func (mgr *flogoStateManager) handleEventRunner(evt EventRunner) {
 	switch evt.Type {
+	case EventRunnerOutput:
+		log.Debug().Msg("runner output")
+		mgr.state.runner.runCurrent = evt.Process
 	case EventRunnerStart:
 		log.Debug().Msg("runner start")
 		mgr.state.runner.status = statusRunnerRunning
@@ -220,12 +223,6 @@ func (mgr *flogoStateManager) handleEventRunner(evt EventRunner) {
 	case EventRunnerStopErr:
 		log.Debug().Msg("runner stop err")
 		mgr.state.runner.status = statusRunnerStopErr
-	case EventRunnerStdout:
-		log.Debug().Msg("runner stdout")
-		mgr.state.runner.runCurrent = evt.Process
-	case EventRunnerStderr:
-		log.Debug().Msg("runner stderr")
-		mgr.state.runner.runCurrent = evt.Process
 	case EventRunnerWaiting:
 		log.Debug().Msg("runner waiting")
 		mgr.state.runner.status = statusRunnerStopErr

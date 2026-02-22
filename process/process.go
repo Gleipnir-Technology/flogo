@@ -92,12 +92,6 @@ func (p *Process) Start(ctx context.Context) error {
 		return errors.New("Failed to get stderr pipe")
 	}
 
-	// Start the command (non-blocking)
-	if err := p.cmd.Start(); err != nil {
-		p.cmd = nil
-		return fmt.Errorf("Failed to start '%s': %w", p.target, err)
-	}
-
 	// Read stdout line by line
 	scanner := bufio.NewScanner(stdout)
 	go func() {
@@ -111,10 +105,16 @@ func (p *Process) Start(ctx context.Context) error {
 	stderrScanner := bufio.NewScanner(stderr)
 	go func() {
 		for stderrScanner.Scan() {
-			b := scanner.Bytes()
+			b := stderrScanner.Bytes()
 			p.onStream(p.OnStderr, &p.Stderr, p.chanStderr, b)
 		}
 	}()
+
+	// Start the command (non-blocking)
+	if err := p.cmd.Start(); err != nil {
+		p.cmd = nil
+		return fmt.Errorf("Failed to start '%s': %w", p.target, err)
+	}
 
 	// Wait for the command to finish
 	go func() {
