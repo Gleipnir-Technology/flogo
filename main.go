@@ -14,7 +14,7 @@ import (
 
 func main() {
 	var err error
-	disable_tui := os.Getenv("DISABLE_TUI")
+	disable_tui := os.Getenv("FLOGO_DISABLE_TUI")
 	enable_tui := true
 	if disable_tui != "" {
 		enable_tui = false
@@ -77,7 +77,7 @@ func reload() {
 	log.Info().Msg("fake reload")
 }
 func setupLogging(file *os.File) {
-	if os.Getenv("VERBOSE") != "" {
+	if os.Getenv("FLOGO_VERBOSE") != "" {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	} else {
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
