@@ -134,7 +134,7 @@ func (u ui) drawRunning(state *stateRunner) {
 	}
 
 	switch state.status {
-	case statusRunnerRunning:
+	case statusRunnerRunning, statusRunnerStopErr, statusRunnerStopOK:
 		if state.runCurrent == nil {
 			u.drawText(0, 1, tcell.StyleDefault, "flogo: no runCurrent.")
 		} else if len(state.runCurrent.output) > 0 {
@@ -143,18 +143,6 @@ func (u ui) drawRunning(state *stateRunner) {
 			u.drawText(0, 1, tcell.StyleDefault, "flogo: no runPrevious.")
 		} else {
 			u.drawText(0, 1, tcell.StyleDefault, "flogo: maybe use previous output...?")
-		}
-	case statusRunnerStopOK:
-		u.drawText(0, 1, tcell.StyleDefault, "flogo: stopped.")
-	case statusRunnerStopErr:
-		if state.runCurrent == nil {
-			u.drawText(0, 1, tcell.StyleDefault, "flogo: no runCurrent")
-		} else if len(state.runCurrent.output) > 0 {
-			DrawBytesMultiline(u.screen, 0, 1, tcell.StyleDefault, state.runCurrent.output)
-		} else if state.runPrevious != nil {
-			u.drawText(0, 1, tcell.StyleDefault, "flogo: maybe use previous output...?")
-		} else {
-			u.drawText(0, 1, tcell.StyleDefault, "flogo: no output to show.")
 		}
 	case statusRunnerWaiting:
 		u.drawText(0, 1, tcell.StyleDefault, "flogo: waiting...")
