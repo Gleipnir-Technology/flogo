@@ -32,4 +32,9 @@ go.work.sum
 # .vscode/
 
 # Build output
+flogo
+flogo.log
+example/color/color
+example/emitter/emitter
 example/webserver/webserver
+test/runner/runner
