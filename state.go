@@ -16,6 +16,7 @@ type stateFlogo struct {
 }
 type stateProcess struct {
 	exitCode *int
+	output   []byte
 	stderr   []byte
 	stdout   []byte
 }

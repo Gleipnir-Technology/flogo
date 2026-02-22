@@ -14,7 +14,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT)
 
 	// Set up ticker for regular output
-	ticker := time.NewTicker(1 * time.Second)
+	//ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
 	counter := 0

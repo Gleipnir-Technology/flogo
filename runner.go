@@ -51,12 +51,23 @@ func (r *Runner) Run(ctx context.Context) error {
 	p := process.New(build_output)
 	sub_exit := p.OnExit.Subscribe()
 	sub_start := p.OnStart.Subscribe()
-	sub_stderr := p.OnStderr.Subscribe()
-	sub_stdout := p.OnStdout.Subscribe()
+	//sub_stderr := p.OnStderr.Subscribe()
+	//sub_stdout := p.OnStdout.Subscribe()
+	sub_output := p.OnOutput.Subscribe()
 	defer sub_exit.Close()
 	defer sub_start.Close()
-	defer sub_stderr.Close()
-	defer sub_stdout.Close()
+	//defer sub_stderr.Close()
+	//defer sub_stdout.Close()
+	defer sub_output.Close()
+	// Start runner by starting the command, if we can
+	err = p.Start(ctx)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logger.Info().Err(err).Msg("Runner process does not exist, waiting for it to be built")
+			r.onWaiting()
+		}
+		logger.Warn().Err(err).Msg("failed to start runner process")
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -69,19 +80,24 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-sub_start.C:
 			log.Info().Msg("Runner's process started")
 			r.onStart()
-		case b := <-sub_stderr.C:
-			log.Debug().Bytes("b", b).Msg("subprocess stderr")
-			r.onOutput(p)
-		case b := <-sub_stdout.C:
-			log.Debug().Bytes("b", b).Msg("subprocess stdout")
+		/*
+			case b := <-sub_stderr.C:
+				log.Debug().Bytes("b", b).Msg("subprocess stderr")
+				r.onOutput(p)
+			case b := <-sub_stdout.C:
+				log.Debug().Bytes("b", b).Msg("subprocess stdout")
+				r.onOutput(p)
+		*/
+		case b := <-sub_output.C:
+			log.Debug().Bytes("b", b).Msg("subprocess output")
 			r.onOutput(p)
 		case <-r.DoRestart:
 			log.Info().Msg("Restart signal received, restarting process...")
-			err := p.Restart(ctx)
+			/*err := p.Restart(ctx)
 			if err != nil {
 				r.OnDeath <- fmt.Errorf("runner restart err: %w", err)
 				return nil
-			}
+			}*/
 		}
 	}
 }
@@ -107,6 +123,7 @@ func (r *Runner) onOutput(p *process.Process) {
 	r.OnEvent <- EventRunner{
 		Process: &stateProcess{
 			exitCode: nil,
+			output:   p.Output.Bytes(),
 			stderr:   p.Stderr.Bytes(),
 			stdout:   p.Stdout.Bytes(),
 		},

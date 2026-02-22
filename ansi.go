@@ -10,30 +10,73 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+func DrawBytesMultiline(s tcell.Screen, start_x, start_y int, style tcell.Style, buffer []byte) {
+	parsed, err := ansi.Parse(string(buffer))
+	// Convert the buffer into ansi sequences with newlines and wrapping
+	max_x, max_y := s.Size()
+	sections, err := fitToScreen(start_x, start_y, max_x, max_y, parsed)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to parse ANSI")
+		return
+	}
+	DrawStyledText(s, start_x, start_y, sections)
+}
+
 // DrawStyledText renders styled segments to the tcell screen
-func DrawStyledText(s tcell.Screen, start_x, start_y int, text []*ansi.StyledText) {
-	col := start_x
-	row := start_y
-	max_x, _ := s.Size()
-	for _, seg := range text {
-		style := convertStyle(seg)
-		for _, r := range seg.Label {
-			s.SetContent(col, row, r, nil, style)
-			col++
-			if r == '\n' {
-				col = start_x
-				row = row + 1
-			} else if col > max_x {
-				col = start_x
-				row = row + 1
+func DrawStyledText(s tcell.Screen, x_start, y_start int, lines [][]*ansi.StyledText) {
+	x := x_start
+	_, y_max := s.Size()
+	// We draw the lines in reverse order so we ensure we are seeing the latest output
+	y_count := y_max - y_start
+	lines_len := len(lines)
+	for y_offset := range y_count {
+		idx_base := max(lines_len-y_count, 0)
+		idx := idx_base + y_offset
+		if idx >= lines_len {
+			return
+		}
+		//log.Debug().Int("idx", idx).Int("lines_len", lines_len).Int("y_offset", y_offset).Send()
+		line := lines[idx]
+		y := y_start + y_offset
+		for _, seg := range line {
+			style := convertStyle(seg)
+			for _, r := range seg.Label {
+				s.SetContent(x, y, r, nil, style)
+				x++
 			}
 		}
+		x = x_start
 	}
 }
 
-func ParseANSI(buf []byte) ([]*ansi.StyledText, error) {
-	//log.Debug().Bytes("buf", buf).Send()
-	return ansi.Parse(string(buf))
+func fitToScreen(start_x, start_y, max_x, max_y int, parsed []*ansi.StyledText) ([][]*ansi.StyledText, error) {
+	lines := make([][]*ansi.StyledText, 0)
+	current_line := make([]*ansi.StyledText, 0)
+	for _, section := range parsed {
+		cur_label := strings.Builder{}
+		i := start_x
+		for _, r := range section.Label {
+			if r == '\n' || i > max_x {
+				current_line = append(current_line, &ansi.StyledText{
+					Label:      cur_label.String(),
+					FgCol:      section.FgCol,
+					BgCol:      section.BgCol,
+					Style:      section.Style,
+					ColourMode: section.ColourMode,
+					Offset:     section.Offset,
+					Len:        len(cur_label.String()),
+				})
+				i = start_x
+				lines = append(lines, current_line)
+				current_line = make([]*ansi.StyledText, 0)
+				cur_label.Reset()
+			} else {
+				cur_label.WriteRune(r)
+			}
+		}
+	}
+	log.Debug().Int("len lines", len(lines)).Int("len parsed", len(parsed)).Msg("fit to screen")
+	return lines, nil
 }
 
 func StripColorCodes(buf []byte) string {

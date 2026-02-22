@@ -15,10 +15,13 @@ import (
 type Process struct {
 	// Contains the exit code after the program exits
 	ExitCode *int
+	OnOutput *SubscriptionManager[[]byte]
 	OnStderr *SubscriptionManager[[]byte]
 	OnStdout *SubscriptionManager[[]byte]
 	OnExit   *SubscriptionManager[*os.ProcessState]
 	OnStart  *SubscriptionManager[struct{}]
+	// Contains the interleaved total output emitted by this process
+	Output bytes.Buffer
 	// Contains all of stdeer that has been emitted by this process
 	Stderr bytes.Buffer
 	// Contains all of stdout that has been emitted by this process
@@ -36,10 +39,11 @@ type Process struct {
 func New(target string, args ...string) *Process {
 	return &Process{
 		ExitCode:   nil,
+		OnExit:     NewSubscriptionManager[*os.ProcessState](),
+		OnOutput:   NewSubscriptionManager[[]byte](),
+		OnStart:    NewSubscriptionManager[struct{}](),
 		OnStderr:   NewSubscriptionManager[[]byte](),
 		OnStdout:   NewSubscriptionManager[[]byte](),
-		OnExit:     NewSubscriptionManager[*os.ProcessState](),
-		OnStart:    NewSubscriptionManager[struct{}](),
 		Stdout:     bytes.Buffer{},
 		Stderr:     bytes.Buffer{},
 		args:       args,
@@ -73,7 +77,7 @@ func (p *Process) Start(ctx context.Context) error {
 	p.Stdout.Reset()
 	p.Stderr.Reset()
 	if _, err := os.Stat(p.target); os.IsNotExist(err) {
-		return fmt.Errorf("Target program '%s' does not exist", p.target)
+		return fmt.Errorf("Target program '%s' does not exist: %w", p.target, err)
 	}
 	// Create the command
 	p.cmd = exec.Command(p.target)
@@ -154,9 +158,12 @@ func (p *Process) Stop() {
 func (p *Process) onStream(mgr *SubscriptionManager[[]byte], buf *bytes.Buffer, c chan<- []byte, b []byte) {
 	buf.Write(b)
 	buf.Write([]byte("\n"))
+	p.Output.Write(b)
+	p.Output.Write([]byte("\n"))
 	select {
 	case c <- b:
 	default:
 	}
 	mgr.Publish(b)
+	p.OnOutput.Publish(b)
 }

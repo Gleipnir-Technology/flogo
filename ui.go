@@ -87,15 +87,11 @@ func (u ui) drawBuildStatus(state *stateBuilder) {
 		style = tcell.StyleDefault.Foreground(color.Red)
 		if state.buildCurrent == nil {
 			content = string("flogo: no build data")
-		} else if len(state.buildCurrent.stderr) > 0 {
-			content = string(state.buildCurrent.stderr)
-		} else if len(state.buildCurrent.stdout) > 0 {
-			content = string(state.buildCurrent.stdout)
+		} else if len(state.buildCurrent.output) > 0 {
+			content = string(state.buildCurrent.output)
 		} else if state.buildPrevious != nil {
-			if len(state.buildPrevious.stderr) > 0 {
-				content = string(state.buildPrevious.stderr)
-			} else if len(state.buildPrevious.stdout) > 0 {
-				content = string(state.buildPrevious.stdout)
+			if len(state.buildPrevious.output) > 0 {
+				content = string(state.buildPrevious.output)
 			} else {
 				content = "flogo: no output to show."
 			}
@@ -106,10 +102,8 @@ func (u ui) drawBuildStatus(state *stateBuilder) {
 		style = tcell.StyleDefault.Foreground(color.Yellow)
 		if state.buildCurrent == nil {
 			content = "flogo: no output yet"
-		} else if len(state.buildCurrent.stderr) > 0 {
-			content = string(state.buildCurrent.stderr)
-		} else if len(state.buildCurrent.stdout) > 0 {
-			content = string(state.buildCurrent.stdout)
+		} else if len(state.buildCurrent.output) > 0 {
+			content = string(state.buildCurrent.output)
 		} else {
 			content = "flogo: waiting..."
 		}
@@ -143,10 +137,8 @@ func (u ui) drawRunning(state *stateRunner) {
 	case statusRunnerRunning:
 		if state.runCurrent == nil {
 			u.drawText(0, 1, tcell.StyleDefault, "flogo: no runCurrent.")
-		} else if len(state.runCurrent.stderr) > 0 {
-			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stderr)
-		} else if len(state.runCurrent.stdout) > 0 {
-			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stdout)
+		} else if len(state.runCurrent.output) > 0 {
+			DrawBytesMultiline(u.screen, 0, 1, tcell.StyleDefault, state.runCurrent.output)
 		} else if state.runPrevious == nil {
 			u.drawText(0, 1, tcell.StyleDefault, "flogo: no runPrevious.")
 		} else {
@@ -157,10 +149,8 @@ func (u ui) drawRunning(state *stateRunner) {
 	case statusRunnerStopErr:
 		if state.runCurrent == nil {
 			u.drawText(0, 1, tcell.StyleDefault, "flogo: no runCurrent")
-		} else if len(state.runCurrent.stderr) > 0 {
-			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stderr)
-		} else if len(state.runCurrent.stdout) > 0 {
-			u.drawBytesMultiline(0, 1, tcell.StyleDefault, state.runCurrent.stdout)
+		} else if len(state.runCurrent.output) > 0 {
+			DrawBytesMultiline(u.screen, 0, 1, tcell.StyleDefault, state.runCurrent.output)
 		} else if state.runPrevious != nil {
 			u.drawText(0, 1, tcell.StyleDefault, "flogo: maybe use previous output...?")
 		} else {
@@ -179,15 +169,6 @@ func (u ui) drawText(x, y int, style tcell.Style, text string) {
 	for i, r := range text {
 		u.screen.SetContent(x+i, y, r, nil, style)
 	}
-}
-func (u ui) drawBytesMultiline(x, y int, style tcell.Style, buffer []byte) {
-	// Convert the buffer into ansi sequences
-	text, err := ParseANSI(buffer)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to parse ANSI")
-		return
-	}
-	DrawStyledText(u.screen, x, y, text)
 }
 func (u ui) drawTitle(state *stateFlogo) {
 	switch state.builder.status {
