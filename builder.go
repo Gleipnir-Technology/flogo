@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Gleipnir-Technology/flogo/process"
 	"github.com/rs/zerolog/log"
 )
 
@@ -27,7 +27,6 @@ type EventBuilder struct {
 	Type    EventBuilderType
 }
 type Builder struct {
-	Parent
 	Debounce time.Duration
 	OnDeath  chan<- error
 	OnEvent  chan<- EventBuilder
@@ -38,110 +37,72 @@ type Builder struct {
 func (b Builder) Run(ctx context.Context) {
 	logger := log.Ctx(ctx)
 	debounce := newDebounce(ctx, b.Debounce)
+	p := process.New("go", "build", ".")
+	p.SetDir(b.Target)
+	sub_exit := p.OnExit.Subscribe()
+	sub_output := p.OnOutput.Subscribe()
+	sub_start := p.OnStart.Subscribe()
+	defer sub_exit.Close()
+	defer sub_output.Close()
+	defer sub_start.Close()
+	err := p.Start(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to start builder process")
+	}
 	for {
 		select {
-		case <-b.ToBuild:
-			debounce(b.BuildProject(ctx))
 		case <-ctx.Done():
 			logger.Info().Msg("Shutdown builder")
 			return
+		case state := <-sub_exit.C:
+			log.Info().Msg("Runner's process exited")
+			b.onExit(p, state)
+		case <-sub_start.C:
+			log.Info().Msg("Runner's process started")
+			b.onStart()
+		case buf := <-sub_output.C:
+			log.Debug().Bytes("b", buf).Msg("subprocess output")
+			b.onOutput(p)
+		case <-b.ToBuild:
+			debounce(func() {
+				p.Start(ctx)
+			})
 		}
 	}
 }
 
-// BuildProject builds the Go project
-func (bld Builder) BuildProject(ctx context.Context) debouncedFunc {
-	return func() {
-		logger := log.Ctx(ctx)
-		cmd := exec.CommandContext(ctx, "go", "build", ".")
-		cmd.Dir = bld.Target
-		stderr, err := cmd.StderrPipe()
-		if err != nil {
-			logger.Error().Msg("no stderr")
-			bld.onBuildFailure(nil, []byte{}, []byte{})
-			return
-		}
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			logger.Error().Msg("no stdout")
-			bld.onBuildFailure(nil, []byte{}, []byte{})
-			return
-		}
-		err = cmd.Start()
-		if err != nil {
-			logger.Error().Msg("no start")
-			bld.onBuildFailure(nil, []byte{}, []byte(fmt.Sprintf("failed to start 'go build .' in %s: %+v", bld.Target, err)))
-			return
-		}
-		scanner := bufio.NewScanner(stdout)
-		go func() {
-			for scanner.Scan() {
-				b := scanner.Bytes()
-				bld.onStdout(b)
-			}
-		}()
-
-		// Read stderr line by line
-		stderrScanner := bufio.NewScanner(stderr)
-		go func() {
-			for stderrScanner.Scan() {
-				b := stderrScanner.Bytes()
-				bld.onStderr(b)
-			}
-		}()
-
-		logger.Info().Msg("Build start")
-		bld.onBuildStart("go build .")
-
-		if err = cmd.Wait(); err != nil {
-			if ex, ok := err.(*exec.ExitError); ok {
-				i := ex.ExitCode()
-				bld.onBuildFailure(&i, []byte{}, ex.Stderr)
-			} else {
-				bld.onBuildFailure(nil, []byte(err.Error()), []byte{})
-			}
-			return
-		}
-		//logger.Info().Bytes("stdout", stdout_b).Bytes("stderr", stderr_b).Msg("build complete")
-		bld.onBuildSuccess()
-	}
-}
-
-func (b Builder) onBuildOutput(stdout []byte, stderr []byte) {
+func (b Builder) onOutput(p *process.Process) {
 	b.OnEvent <- EventBuilder{
 		Process: &stateProcess{
 			exitCode: nil,
-			stdout:   stdout,
-			stderr:   stderr,
+			output:   p.Output.Bytes(),
+			stderr:   p.Stderr.Bytes(),
+			stdout:   p.Stdout.Bytes(),
 		},
 		Type: EventBuildOutput,
 	}
 }
-func (b Builder) onBuildFailure(exit_code *int, stdout []byte, stderr []byte) {
-	b.OnEvent <- EventBuilder{
-		Process: &stateProcess{
-			exitCode: exit_code,
-			stdout:   stdout,
-			stderr:   stderr,
-		},
-		Type: EventBuildFailure,
+func (b Builder) onExit(p *process.Process, state *os.ProcessState) {
+	var t EventBuilderType
+	i := state.ExitCode()
+	if i == 0 {
+		t = EventBuildSuccess
+	} else {
+		t = EventBuildFailure
 	}
-}
-func (b Builder) onBuildStart(m string) {
-	b.OnEvent <- EventBuilder{
-		Process: nil,
-		Type:    EventBuildStart,
-	}
-}
-func (b Builder) onBuildSuccess() {
-	i := 0
 	b.OnEvent <- EventBuilder{
 		Process: &stateProcess{
 			exitCode: &i,
-			stdout:   b.Stdout.Bytes(),
-			stderr:   b.Stderr.Bytes(),
+			stderr:   p.Stderr.Bytes(),
+			stdout:   p.Stdout.Bytes(),
 		},
-		Type: EventBuildSuccess,
+		Type: t,
+	}
+}
+func (b Builder) onStart() {
+	b.OnEvent <- EventBuilder{
+		Process: nil,
+		Type:    EventBuildStart,
 	}
 }
 func (b Builder) onError(err error) {

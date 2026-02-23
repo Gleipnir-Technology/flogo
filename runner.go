@@ -25,8 +25,6 @@ type EventRunner struct {
 	Type    EventRunnerType
 }
 type Runner struct {
-	Parent
-
 	DoRestart <-chan struct{}
 	OnDeath   chan<- error
 	OnEvent   chan<- EventRunner
@@ -40,15 +38,15 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("Failed to determine build output name: %v", err)
 	}
 	base := filepath.Base(build_output)
+	logger.Info().Str("target", build_output).Msg("Build output")
+	p := process.New(build_output)
 	// Avoid infinite recursion when we self-host
 	if base == "flogo" {
 		logger.Info().Msg("Refusing to infinitely recurse on flogo")
 		r.onStart()
-		r.onStdout([]byte("no flogo recursing."))
+		r.onOutput(p)
 		return nil
 	}
-	logger.Info().Str("target", build_output).Msg("Build output")
-	p := process.New(build_output)
 	sub_exit := p.OnExit.Subscribe()
 	sub_start := p.OnStart.Subscribe()
 	//sub_stderr := p.OnStderr.Subscribe()
@@ -93,11 +91,11 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.onOutput(p)
 		case <-r.DoRestart:
 			log.Info().Msg("Restart signal received, restarting process...")
-			/*err := p.Restart(ctx)
+			err := p.Restart(ctx)
 			if err != nil {
 				r.OnDeath <- fmt.Errorf("runner restart err: %w", err)
 				return nil
-			}*/
+			}
 		}
 	}
 }

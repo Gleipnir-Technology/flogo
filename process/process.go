@@ -33,6 +33,7 @@ type Process struct {
 	chanStderr chan []byte
 	chanStdout chan []byte
 	cmd        *exec.Cmd
+	dir        string
 	target     string
 }
 
@@ -64,6 +65,12 @@ func (p *Process) Restart(ctx context.Context) error {
 	p.Stop()
 	return p.Start(ctx)
 }
+func (p *Process) SetDir(d string) {
+	p.dir = d
+	if p.cmd != nil {
+		p.cmd.Dir = d
+	}
+}
 func (p *Process) Signal(s syscall.Signal) error {
 	if p.cmd == nil {
 		return fmt.Errorf("cmd is nil")
@@ -82,6 +89,9 @@ func (p *Process) Start(ctx context.Context) error {
 	// Create the command
 	p.cmd = exec.Command(p.target)
 
+	if p.dir != "" {
+		p.cmd.Dir = p.dir
+	}
 	// Get a pipe for stdout
 	stdout, err := p.cmd.StdoutPipe()
 	if err != nil {
