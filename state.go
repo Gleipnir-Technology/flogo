@@ -116,19 +116,27 @@ func (mgr *flogoStateManager) Run(bind string, target string, enable_tui bool) e
 
 	watcher := Watcher{
 		OnBuild: mgr.chanToBuild,
-		OnDeath: mgr.chanSomethingDied,
 		Target:  target,
 	}
-	go watcher.Run(ctx)
+	go func() {
+		err := watcher.Run(ctx)
+		if err != nil {
+			mgr.chanSomethingDied <- fmt.Errorf("watcher died: %w", err)
+		}
+	}()
 
 	builder := Builder{
 		Debounce: time.Millisecond * 300,
 		OnEvent:  mgr.chanBuilderEvents,
-		OnDeath:  mgr.chanSomethingDied,
 		Target:   target,
 		ToBuild:  mgr.chanToBuild,
 	}
-	go builder.Run(ctx)
+	go func() {
+		err := builder.Run(ctx)
+		if err != nil {
+			mgr.chanSomethingDied <- fmt.Errorf("builder died: %w", err)
+		}
+	}()
 	mgr.chanToBuild <- struct{}{}
 
 	runner := Runner{
@@ -140,7 +148,7 @@ func (mgr *flogoStateManager) Run(bind string, target string, enable_tui bool) e
 	go func() {
 		err := runner.Run(ctx)
 		if err != nil {
-			mgr.chanSomethingDied <- err
+			mgr.chanSomethingDied <- fmt.Errorf("runner died: %w", err)
 		}
 	}()
 
@@ -192,6 +200,9 @@ func (mgr *flogoStateManager) Run(bind string, target string, enable_tui bool) e
 }
 func (mgr *flogoStateManager) handleEventBuilder(evt EventBuilder) {
 	switch evt.Type {
+	case EventBuildOutput:
+		log.Debug().Msg("build output")
+		mgr.state.builder.buildCurrent = evt.Process
 	case EventBuildFailure:
 		log.Debug().Msg("build failure")
 		mgr.state.builder.status = statusBuilderFailed

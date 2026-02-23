@@ -2,11 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/Gleipnir-Technology/flogo/process"
@@ -28,13 +24,12 @@ type EventBuilder struct {
 }
 type Builder struct {
 	Debounce time.Duration
-	OnDeath  chan<- error
 	OnEvent  chan<- EventBuilder
 	Target   string
 	ToBuild  <-chan struct{}
 }
 
-func (b Builder) Run(ctx context.Context) {
+func (b Builder) Run(ctx context.Context) error {
 	logger := log.Ctx(ctx)
 	debounce := newDebounce(ctx, b.Debounce)
 	p := process.New("go", "build", ".")
@@ -53,7 +48,7 @@ func (b Builder) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			logger.Info().Msg("Shutdown builder")
-			return
+			return nil
 		case state := <-sub_exit.C:
 			log.Info().Msg("Runner's process exited")
 			b.onExit(p, state)
@@ -65,7 +60,11 @@ func (b Builder) Run(ctx context.Context) {
 			b.onOutput(p)
 		case <-b.ToBuild:
 			debounce(func() {
-				p.Start(ctx)
+				log.Info().Msg("rebuild.")
+				err := p.Start(ctx)
+				if err != nil {
+					log.Error().Err(err).Msg("failed to start")
+				}
 			})
 		}
 	}
@@ -107,42 +106,4 @@ func (b Builder) onStart() {
 }
 func (b Builder) onError(err error) {
 	log.Error().Err(err).Msg("HANDLE THIS")
-}
-
-// determineBuildOutputName determines the build output name from the go.mod file
-func determineBuildOutputAbs(target string) (string, error) {
-	abs, err := filepath.Abs(target)
-	if err != nil {
-		return "", fmt.Errorf("Failed to get abs path: %w", err)
-	}
-	// Check if we're in a Go module
-	go_mod_path := filepath.Join(".", "go.mod")
-	if _, err := os.Stat(go_mod_path); os.IsNotExist(err) {
-		return "", fmt.Errorf("no go.mod file found, not in a Go module")
-	}
-
-	// Use go list to get the module name
-	args := []string{"list", "-f", "{{.Name}}", "./" + target}
-	cmd := exec.Command("go", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		full_cmd := "go " + strings.Join(args, " ")
-		if ex, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("Failed to run '%s': %s, %w", full_cmd, string(ex.Stderr), ex)
-		} else {
-			return "", fmt.Errorf("Failed to run '%s': %w", full_cmd, err)
-		}
-	}
-
-	// Extract the last part of the module path
-	module := strings.TrimSpace(string(output))
-	if module == "main" {
-		// For the special name "main" we use the parent directory name
-		// since that's what 'go build' will do
-		base := filepath.Base(abs)
-		// We then re-add that base to get the full abs path to the build output
-		full := filepath.Join(abs, base)
-		return full, nil
-	}
-	return "", fmt.Errorf("Not sure what to do with '%s': this isn't implemented yet", module)
 }

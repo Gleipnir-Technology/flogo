@@ -93,12 +93,20 @@ func setupLogging(file *os.File) {
 	}
 
 	// Custom timestamp formatter showing elapsed time
-	writer.FormatTimestamp = func(i interface{}) string {
+	writer.FormatTimestamp = func(i any) string {
 		elapsed := time.Since(startTime)
-		return fmt.Sprintf("\x1b[90m[+%s]\x1b[0m",
-			elapsed.Round(time.Millisecond))
+
+		hours := int(elapsed.Hours())
+		minutes := int(elapsed.Minutes()) % 60
+		seconds := int(elapsed.Seconds()) % 60
+		millis := int(elapsed.Milliseconds()) % 1000
+
+		return fmt.Sprintf("\x1b[90m[+%02d:%02d:%02d.%03d]\x1b[0m",
+			hours, minutes, seconds, millis)
 	}
 
 	// Create logger with timestamp
-	log.Logger = zerolog.New(writer).With().Timestamp().Logger()
+	log.Logger = zerolog.New(writer).With().Timestamp().Str("component", "main").Logger()
+
+	log.Debug().Msg("Running in verbose mode due to FLOGO_VERBOSE")
 }

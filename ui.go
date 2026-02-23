@@ -93,10 +93,10 @@ func (u ui) drawBuildStatus(state *stateBuilder) {
 			if len(state.buildPrevious.output) > 0 {
 				content = string(state.buildPrevious.output)
 			} else {
-				content = "flogo: no output to show."
+				content = "flogo: no build output to show."
 			}
 		} else {
-			content = "flogo: no output to show."
+			content = "flogo: no build output to show."
 		}
 	case statusBuilderCompiling:
 		style = tcell.StyleDefault.Foreground(color.Yellow)

@@ -13,42 +13,43 @@ import (
 
 type Watcher struct {
 	OnBuild chan<- struct{}
-	OnDeath chan<- error
 	Target  string
 }
 
-func (w Watcher) Run(ctx context.Context) {
+func (w Watcher) Run(ctx context.Context) error {
 	// Create a new watcher
-	logger := log.Ctx(ctx)
+	logger := log.Ctx(ctx).With().Str("component", "watcher").Logger()
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		w.OnDeath <- fmt.Errorf("Failed to create new watcher: %w", err)
-		return
+		return fmt.Errorf("Failed to create new watcher: %w", err)
 	}
 
 	// Recursively add directories to watch
-	err = filepath.Walk(w.Target, func(path string, info os.FileInfo, err error) error {
+	abs, err := filepath.Abs(w.Target)
+	if err != nil {
+		return fmt.Errorf("Determine abs: %w", err)
+	}
+	err = filepath.Walk(abs, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return fmt.Errorf("creating walk: %w", err)
 		}
 
 		// Skip hidden directories and vendor
-		/*
-			if info.IsDir() && (strings.HasPrefix(info.Name(), ".") || info.Name() == "vendor") {
-				return filepath.SkipDir
-			}
-		*/
+		if info.IsDir() && (strings.HasPrefix(info.Name(), ".") || info.Name() == "vendor") {
+			logger.Debug().Str("name", info.Name()).Msg("Skipping")
+			return filepath.SkipDir
+		}
 
 		// Add directories to watch
 		if info.IsDir() {
+			logger.Debug().Str("path", path).Msg("add to watch list")
 			return watcher.Add(path)
 		}
 		return nil
 	})
 
 	if err != nil {
-		w.OnDeath <- fmt.Errorf("Failed to walk filepath: %w", err)
-		return
+		return fmt.Errorf("Failed to walk filepath: %w", err)
 	}
 
 	logger.Info().Str("target", w.Target).Msg("Watcher started. Monitoring for changes...")
@@ -56,8 +57,7 @@ func (w Watcher) Run(ctx context.Context) {
 		select {
 		case event, ok := <-watcher.Events:
 			if !ok {
-				w.OnDeath <- fmt.Errorf("Failed to get file watcher event")
-				return
+				return fmt.Errorf("Failed to get file watcher event")
 			}
 
 			// Check if it's a .go file and if it was modified, created, or renamed
@@ -74,11 +74,10 @@ func (w Watcher) Run(ctx context.Context) {
 
 		case err, ok := <-watcher.Errors:
 			if !ok {
-				w.OnDeath <- fmt.Errorf("Failed to get file watcher errors")
+				return fmt.Errorf("Failed to get file watcher errors: %w", err)
 			} else {
-				w.OnDeath <- fmt.Errorf("Got watcher error: %w", err)
+				return fmt.Errorf("Got watcher error: %w", err)
 			}
-			return
 		}
 	}
 }

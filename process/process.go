@@ -81,13 +81,11 @@ func (p *Process) SignalInterrupt() {
 	p.Signal(syscall.SIGINT)
 }
 func (p *Process) Start(ctx context.Context) error {
+	p.Output.Reset()
 	p.Stdout.Reset()
 	p.Stderr.Reset()
-	if _, err := os.Stat(p.target); os.IsNotExist(err) {
-		return fmt.Errorf("Target program '%s' does not exist: %w", p.target, err)
-	}
 	// Create the command
-	p.cmd = exec.Command(p.target)
+	p.cmd = exec.Command(p.target, p.args...)
 
 	if p.dir != "" {
 		p.cmd.Dir = p.dir

@@ -26,7 +26,7 @@ func main() {
 
 	bind := os.Getenv("BIND")
 	if bind == "" {
-		bind = ":9001"
+		bind = ":9002"
 	}
 	fmt.Printf("Server starting on port %s...\n", bind)
 	log.Fatal(http.ListenAndServe(bind, r))
