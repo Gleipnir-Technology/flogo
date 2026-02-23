@@ -12,6 +12,7 @@ import (
 
 func DrawBytesMultiline(s tcell.Screen, start_x, start_y int, style tcell.Style, buffer []byte) {
 	parsed, err := ansi.Parse(string(buffer))
+
 	// Convert the buffer into ansi sequences with newlines and wrapping
 	max_x, max_y := s.Size()
 	sections, err := fitToScreen(start_x, start_y, max_x, max_y, parsed)
@@ -19,11 +20,11 @@ func DrawBytesMultiline(s tcell.Screen, start_x, start_y int, style tcell.Style,
 		log.Error().Err(err).Msg("failed to parse ANSI")
 		return
 	}
-	DrawStyledText(s, start_x, start_y, sections)
+	drawStyledText(s, start_x, start_y, sections)
 }
 
-// DrawStyledText renders styled segments to the tcell screen
-func DrawStyledText(s tcell.Screen, x_start, y_start int, lines [][]*ansi.StyledText) {
+// drawStyledText renders styled segments to the tcell screen
+func drawStyledText(s tcell.Screen, x_start, y_start int, lines [][]*ansi.StyledText) {
 	x := x_start
 	_, y_max := s.Size()
 	// We draw the lines in reverse order so we ensure we are seeing the latest output
@@ -40,6 +41,10 @@ func DrawStyledText(s tcell.Screen, x_start, y_start int, lines [][]*ansi.Styled
 		y := y_start + y_offset
 		for _, seg := range line {
 			style := convertStyle(seg)
+			/*log.Debug().
+			Str("fg", style.GetForeground().String()).
+			Str("bg", style.GetBackground().String()).
+			Send()*/
 			for _, r := range seg.Label {
 				s.SetContent(x, y, r, nil, style)
 				x++
@@ -53,8 +58,9 @@ func fitToScreen(start_x, start_y, max_x, max_y int, parsed []*ansi.StyledText) 
 	lines := make([][]*ansi.StyledText, 0)
 	current_line := make([]*ansi.StyledText, 0)
 	cur_label := strings.Builder{}
+	i := start_x
 	for _, section := range parsed {
-		i := start_x
+		debugLogANSI(section)
 		for _, r := range section.Label {
 			if r == '\n' || i > max_x {
 				current_line = append(current_line, &ansi.StyledText{
@@ -74,8 +80,19 @@ func fitToScreen(start_x, start_y, max_x, max_y int, parsed []*ansi.StyledText) 
 				cur_label.WriteRune(r)
 			}
 		}
+		current_line = append(current_line, &ansi.StyledText{
+			Label:      cur_label.String(),
+			FgCol:      section.FgCol,
+			BgCol:      section.BgCol,
+			Style:      section.Style,
+			ColourMode: section.ColourMode,
+			Offset:     section.Offset,
+			Len:        len(cur_label.String()),
+		})
+		cur_label.Reset()
 	}
-	log.Debug().Int("len lines", len(lines)).Int("len parsed", len(parsed)).Msg("fit to screen")
+	lines = append(lines, current_line)
+	log.Debug().Int("len.lines", len(lines)).Int("len.parsed", len(parsed)).Msg("fit to screen")
 	return lines, nil
 }
 
@@ -89,6 +106,7 @@ func StripColorCodes(buf []byte) string {
 func convertStyle(t *ansi.StyledText) tcell.Style {
 	style := tcell.StyleDefault
 	if t == nil {
+		log.Debug().Msg("converting nil style")
 		return style
 	}
 	if t.FgCol != nil {
@@ -121,10 +139,6 @@ func convertStyle(t *ansi.StyledText) tcell.Style {
 	return style
 }
 func convertStyleColor(style tcell.Style, c *ansi.Col) color.Color {
-	result := color.GetColor(strings.ToLower(c.Name))
-	if result.Valid() {
-		return result
-	}
 	log.Debug().
 		Int("id", c.Id).
 		Str("hex", c.Hex).
@@ -133,9 +147,24 @@ func convertStyleColor(style tcell.Style, c *ansi.Col) color.Color {
 		Uint("b", uint(c.Rgb.B)).
 		Str("name", c.Name).
 		Msg("color fallback")
+	result := color.GetColor(strings.ToLower(c.Name))
+	if result.Valid() {
+		return result
+	}
 	return color.NewRGBColor(
 		int32(c.Rgb.R),
 		int32(c.Rgb.G),
 		int32(c.Rgb.B),
 	)
+}
+func debugLogANSI(s *ansi.StyledText) {
+	fg := "nil"
+	bg := "nil"
+	if s.FgCol != nil {
+		fg = s.FgCol.Hex
+	}
+	if s.BgCol != nil {
+		bg = s.BgCol.Hex
+	}
+	log.Debug().Str("fg", fg).Str("bg", bg).Str("label", s.Label).Send()
 }
