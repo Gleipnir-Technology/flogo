@@ -123,16 +123,10 @@ func (mgr *flogoStateManager) Run(root_logger zerolog.Logger, u ui.UI, bind stri
 			}()
 		case evt := <-mgr.chanOnBuilder:
 			mgr.handleEventBuilder(logger, evt)
-			go func() {
-				mgr.chanDoUI <- mgr.state
-				mgr.chanDoWebserver <- mgr.state
-			}()
+			go mgr.sendUpdates(mgr.state)
 		case evt := <-mgr.chanOnRunner:
 			mgr.handleEventRunner(logger, evt)
-			go func() {
-				mgr.chanDoUI <- mgr.state
-				mgr.chanDoWebserver <- mgr.state
-			}()
+			go mgr.sendUpdates(mgr.state)
 		case evt := <-mgr.chanOnUI:
 			mgr.handleEventUI(logger, u, evt)
 		}
@@ -185,7 +179,7 @@ func (mgr *flogoStateManager) handleEventBuilder(logger zerolog.Logger, evt Even
 		logger.Debug().Msg("build success")
 		mgr.state.Builder.Status = state.StatusBuilderOK
 		mgr.state.Builder.BuildCurrent = evt.Process
-		mgr.chanDoRunner <- struct{}{}
+		go mgr.sendRunnerRestart()
 	default:
 		logger.Debug().Msg("build unknown")
 	}
@@ -227,5 +221,16 @@ func (mgr *flogoStateManager) handleEventUI(logger zerolog.Logger, u ui.UI, evt 
 		mgr.debugState(logger)
 	case ui.EventExit:
 		mgr.isRunning = false
+	case ui.EventRestart:
+		go mgr.sendRunnerRestart()
+	case ui.EventUpdate:
+		go mgr.sendUpdates(mgr.state)
 	}
+}
+func (mgr *flogoStateManager) sendRunnerRestart() {
+	mgr.chanDoRunner <- struct{}{}
+}
+func (mgr *flogoStateManager) sendUpdates(s *state.Flogo) {
+	mgr.chanDoUI <- mgr.state
+	mgr.chanDoWebserver <- mgr.state
 }

@@ -14,6 +14,7 @@ const (
 	EventDebug
 	EventExit
 	EventResize
+	EventRestart
 	EventUpdate // forcibly update clients
 
 )

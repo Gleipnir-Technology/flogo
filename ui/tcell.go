@@ -217,8 +217,12 @@ func convertEvent(evt tcell.Event) Event {
 		if ev.Key() == tcell.KeyCtrlC || ev.Key() == tcell.KeyEscape {
 			logger.Debug().Msg("SIGINT, exiting")
 			return Event{Type: EventExit}
+		} else if ev.Str() == " " {
+			return Event{Type: EventUpdate}
 		} else if ev.Str() == "d" {
 			return Event{Type: EventDebug}
+		} else if ev.Str() == "r" {
+			return Event{Type: EventRestart}
 		} else {
 			logger.Debug().Msg("updating webserver from keypress")
 			return Event{Type: EventUpdate}
