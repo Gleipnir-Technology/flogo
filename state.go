@@ -216,13 +216,15 @@ func (mgr *flogoStateManager) handleEventRunner(logger zerolog.Logger, evt Event
 		mgr.state.Runner.RunPrevious = mgr.state.Runner.RunCurrent
 	case EventRunnerWaiting:
 		logger.Debug().Msg("runner waiting")
-		mgr.state.Runner.Status = state.StatusRunnerStopErr
+		mgr.state.Runner.Status = state.StatusRunnerWaiting
 	default:
 		logger.Debug().Msg("runner unknown")
 	}
 }
 func (mgr *flogoStateManager) handleEventUI(logger zerolog.Logger, u ui.UI, evt ui.Event) {
 	switch evt.Type {
+	case ui.EventDebug:
+		mgr.debugState(logger)
 	case ui.EventExit:
 		mgr.isRunning = false
 	}

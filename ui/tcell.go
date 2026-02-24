@@ -218,7 +218,7 @@ func convertEvent(evt tcell.Event) Event {
 			logger.Debug().Msg("SIGINT, exiting")
 			return Event{Type: EventExit}
 		} else if ev.Str() == "d" {
-			return Event{Type: EventNone}
+			return Event{Type: EventDebug}
 		} else {
 			logger.Debug().Msg("updating webserver from keypress")
 			return Event{Type: EventUpdate}

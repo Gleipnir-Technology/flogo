@@ -11,6 +11,7 @@ type EventType int
 
 const (
 	EventNone EventType = iota
+	EventDebug
 	EventExit
 	EventResize
 	EventUpdate // forcibly update clients
