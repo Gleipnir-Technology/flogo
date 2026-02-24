@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/Gleipnir-Technology/flogo/process"
+	"github.com/Gleipnir-Technology/flogo/state"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -23,7 +25,7 @@ const (
 )
 
 type EventRunner struct {
-	Process *stateProcess
+	Process *state.Process
 	Type    EventRunnerType
 }
 type Runner struct {
@@ -34,7 +36,8 @@ type Runner struct {
 }
 
 func (r *Runner) Run(ctx context.Context) error {
-	logger := log.Ctx(ctx)
+	logger := log.Ctx(ctx).With().Caller().Logger()
+	logger.Info().Msg("Started runner loop")
 	build_output, err := determineBuildOutputAbs(r.Target)
 	if err != nil {
 		return fmt.Errorf("Failed to determine build output name: %v", err)
@@ -45,20 +48,12 @@ func (r *Runner) Run(ctx context.Context) error {
 	// Avoid infinite recursion when we self-host
 	if base == "flogo" {
 		logger.Info().Msg("Refusing to infinitely recurse on flogo")
-		r.onStart()
-		r.onOutput(p)
+		r.onStart(logger)
+		r.onOutput(logger, []byte("no flogo recursing"), p)
 		return nil
 	}
-	sub_exit := p.OnExit.Subscribe()
-	sub_start := p.OnStart.Subscribe()
-	//sub_stderr := p.OnStderr.Subscribe()
-	//sub_stdout := p.OnStdout.Subscribe()
-	sub_output := p.OnOutput.Subscribe()
-	defer sub_exit.Close()
-	defer sub_start.Close()
-	//defer sub_stderr.Close()
-	//defer sub_stdout.Close()
-	defer sub_output.Close()
+	sub_event := p.OnEvent.Subscribe()
+	defer sub_event.Close()
 	// Start runner by starting the command, if we can
 	err = p.Start(ctx)
 	if err != nil {
@@ -71,28 +66,22 @@ func (r *Runner) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info().Msg("Context done, exiting runner")
+			logger.Info().Msg("Context done, exiting runner")
 			p.SignalInterrupt()
-			return ctx.Err()
-		case status := <-sub_exit.C:
-			log.Info().Msg("Runner's process exited")
-			r.onExit(p, status)
-		case <-sub_start.C:
-			log.Info().Msg("Runner's process started")
-			r.onStart()
-		/*
-			case b := <-sub_stderr.C:
-				log.Debug().Bytes("b", b).Msg("subprocess stderr")
-				r.onOutput(p)
-			case b := <-sub_stdout.C:
-				log.Debug().Bytes("b", b).Msg("subprocess stdout")
-				r.onOutput(p)
-		*/
-		case b := <-sub_output.C:
-			log.Debug().Bytes("b", b).Msg("subprocess output")
-			r.onOutput(p)
+			return nil
+		case evt := <-sub_event.C:
+			switch evt.Type {
+			case process.EventProcessOutput:
+				go r.onOutput(logger, evt.Data, p)
+			case process.EventProcessStart:
+				go r.onStart(logger)
+			case process.EventProcessStop:
+				go r.onExit(logger, p, evt.ProcessState)
+			default:
+				logger.Warn().Msg("unrecognized process event")
+			}
 		case <-r.DoRestart:
-			log.Info().Msg("Restart signal received, restarting process...")
+			logger.Info().Msg("Restart signal received, restarting process...")
 			err := p.Restart(ctx)
 			if err != nil {
 				r.OnDeath <- fmt.Errorf("runner restart err: %w", err)
@@ -102,35 +91,39 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-func (r *Runner) onExit(p *process.Process, state *os.ProcessState) {
+func (r *Runner) onExit(logger zerolog.Logger, p *process.Process, s *os.ProcessState) {
+	logger.Info().Msg("Runner's process exited")
 	var t EventRunnerType
-	i := state.ExitCode()
+	i := s.ExitCode()
 	if i == 0 {
 		t = EventRunnerStopOK
 	} else {
 		t = EventRunnerStopErr
 	}
 	r.OnEvent <- EventRunner{
-		Process: &stateProcess{
-			exitCode: &i,
-			stderr:   p.Stderr.Bytes(),
-			stdout:   p.Stdout.Bytes(),
+		Process: &state.Process{
+			ExitCode: &i,
+			Output:   p.Output.Bytes(),
+			Stderr:   p.Stderr.Bytes(),
+			Stdout:   p.Stdout.Bytes(),
 		},
 		Type: t,
 	}
 }
-func (r *Runner) onOutput(p *process.Process) {
+func (r *Runner) onOutput(logger zerolog.Logger, b []byte, p *process.Process) {
+	logger.Debug().Bytes("b", b).Msg("subprocess output")
 	r.OnEvent <- EventRunner{
-		Process: &stateProcess{
-			exitCode: nil,
-			output:   p.Output.Bytes(),
-			stderr:   p.Stderr.Bytes(),
-			stdout:   p.Stdout.Bytes(),
+		Process: &state.Process{
+			ExitCode: nil,
+			Output:   p.Output.Bytes(),
+			Stderr:   p.Stderr.Bytes(),
+			Stdout:   p.Stdout.Bytes(),
 		},
 		Type: EventRunnerOutput,
 	}
 }
-func (r *Runner) onStart() {
+func (r *Runner) onStart(logger zerolog.Logger) {
+	logger.Debug().Msg("Runner's process started")
 	r.OnEvent <- EventRunner{
 		Process: nil,
 		Type:    EventRunnerStart,

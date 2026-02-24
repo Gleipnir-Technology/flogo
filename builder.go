@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/Gleipnir-Technology/flogo/process"
+	"github.com/Gleipnir-Technology/flogo/state"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -19,7 +21,7 @@ const (
 )
 
 type EventBuilder struct {
-	Process *stateProcess
+	Process *state.Process
 	Type    EventBuilderType
 }
 type Builder struct {
@@ -30,16 +32,13 @@ type Builder struct {
 }
 
 func (b Builder) Run(ctx context.Context) error {
-	logger := log.Ctx(ctx)
+	logger := log.Ctx(ctx).With().Caller().Logger()
+
 	debounce := newDebounce(ctx, b.Debounce)
 	p := process.New("go", "build", ".")
 	p.SetDir(b.Target)
-	sub_exit := p.OnExit.Subscribe()
-	sub_output := p.OnOutput.Subscribe()
-	sub_start := p.OnStart.Subscribe()
-	defer sub_exit.Close()
-	defer sub_output.Close()
-	defer sub_start.Close()
+	sub_event := p.OnEvent.Subscribe()
+	logger.Info().Msg("Started builder loop")
 	err := p.Start(ctx)
 	if err != nil {
 		logger.Warn().Err(err).Msg("failed to start builder process")
@@ -49,61 +48,64 @@ func (b Builder) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			logger.Info().Msg("Shutdown builder")
 			return nil
-		case state := <-sub_exit.C:
-			log.Info().Msg("Runner's process exited")
-			b.onExit(p, state)
-		case <-sub_start.C:
-			log.Info().Msg("Runner's process started")
-			b.onStart()
-		case buf := <-sub_output.C:
-			log.Debug().Bytes("b", buf).Msg("subprocess output")
-			b.onOutput(p)
+		case evt := <-sub_event.C:
+			switch evt.Type {
+			case process.EventProcessStop:
+				b.onExit(logger, p, evt.ProcessState)
+			case process.EventProcessStart:
+				b.onStart(logger)
+			case process.EventProcessOutput:
+				b.onOutput(logger, p, evt.Data)
+			default:
+				logger.Warn().Msg("unrecognized process event")
+			}
 		case <-b.ToBuild:
 			debounce(func() {
-				log.Info().Msg("rebuild.")
+				logger.Info().Msg("rebuild.")
 				err := p.Start(ctx)
 				if err != nil {
-					log.Error().Err(err).Msg("failed to start")
+					logger.Error().Err(err).Msg("failed to start")
 				}
 			})
 		}
 	}
 }
 
-func (b Builder) onOutput(p *process.Process) {
+func (b Builder) onOutput(logger zerolog.Logger, p *process.Process, buf []byte) {
+	logger.Debug().Bytes("b", buf).Msg("subprocess output")
 	b.OnEvent <- EventBuilder{
-		Process: &stateProcess{
-			exitCode: nil,
-			output:   p.Output.Bytes(),
-			stderr:   p.Stderr.Bytes(),
-			stdout:   p.Stdout.Bytes(),
+		Process: &state.Process{
+			ExitCode: nil,
+			Output:   p.Output.Bytes(),
+			Stderr:   p.Stderr.Bytes(),
+			Stdout:   p.Stdout.Bytes(),
 		},
 		Type: EventBuildOutput,
 	}
 }
-func (b Builder) onExit(p *process.Process, state *os.ProcessState) {
+func (b Builder) onExit(logger zerolog.Logger, p *process.Process, s *os.ProcessState) {
+	logger.Debug().Msg("process exit")
 	var t EventBuilderType
-	i := state.ExitCode()
+	i := s.ExitCode()
 	if i == 0 {
 		t = EventBuildSuccess
 	} else {
 		t = EventBuildFailure
 	}
 	b.OnEvent <- EventBuilder{
-		Process: &stateProcess{
-			exitCode: &i,
-			stderr:   p.Stderr.Bytes(),
-			stdout:   p.Stdout.Bytes(),
+		Process: &state.Process{
+			ExitCode: &i,
+			Output:   p.Output.Bytes(),
+			Stderr:   p.Stderr.Bytes(),
+			Stdout:   p.Stdout.Bytes(),
 		},
 		Type: t,
 	}
 }
-func (b Builder) onStart() {
+func (b Builder) onStart(logger zerolog.Logger) {
+	logger.Debug().Msg("process started")
 	b.OnEvent <- EventBuilder{
 		Process: nil,
 		Type:    EventBuildStart,
 	}
-}
-func (b Builder) onError(err error) {
-	log.Error().Err(err).Msg("HANDLE THIS")
 }

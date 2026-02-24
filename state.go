@@ -3,283 +3,217 @@ package main
 import (
 	"context"
 	"fmt"
-	"reflect"
+	"os"
 	"time"
 
-	"github.com/gdamore/tcell/v3"
-	"github.com/rs/zerolog/log"
+	"github.com/Gleipnir-Technology/flogo/state"
+	"github.com/Gleipnir-Technology/flogo/ui"
+	"github.com/rs/zerolog"
 )
 
-type stateFlogo struct {
-	builder *stateBuilder
-	runner  *stateRunner
-}
-type stateProcess struct {
-	exitCode *int
-	output   []byte
-	stderr   []byte
-	stdout   []byte
-}
-type stateBuilder struct {
-	buildPrevious *stateProcess
-	buildCurrent  *stateProcess
-	status        statusBuilder
-}
-type stateRunner struct {
-	runPrevious *stateProcess
-	runCurrent  *stateProcess
-	status      statusRunner
-}
 type flogoStateManager struct {
-	chanToBuild         chan struct{}
-	chanBuilderEvents   chan EventBuilder
-	chanRunnerEvents    chan EventRunner
-	chanRunnerRestart   chan struct{}
-	chanSomethingDied   chan error
-	chanWebserverChange chan *stateFlogo
-	isRunning           bool
-	state               stateFlogo
-}
-type statusBuilder int
-
-const (
-	statusBuilderCompiling statusBuilder = iota
-	statusBuilderFailed
-	statusBuilderOK
-)
-
-func StatusStringBuilder(s statusBuilder) string {
-	switch s {
-	case statusBuilderCompiling:
-		return "compiling"
-	case statusBuilderFailed:
-		return "failed"
-	case statusBuilderOK:
-		return "ok"
-	}
-	return "unknown"
-}
-
-type statusRunner int
-
-const (
-	statusRunnerRunning statusRunner = iota
-	statusRunnerStopOK
-	statusRunnerStopErr
-	statusRunnerWaiting
-)
-
-func StatusStringRunner(s statusRunner) string {
-	switch s {
-	case statusRunnerRunning:
-		return "running"
-	case statusRunnerStopOK:
-		return "ok"
-	case statusRunnerStopErr:
-		return "error"
-	case statusRunnerWaiting:
-		return "waiting"
-	}
-	return "unknown"
+	chanDoBuilder   chan struct{}
+	chanDoRunner    chan struct{}
+	chanDoUI        chan *state.Flogo
+	chanDoWebserver chan *state.Flogo
+	chanOnBuilder   chan EventBuilder
+	chanOnRunner    chan EventRunner
+	chanOnUI        chan ui.Event
+	chanOnWatcher   chan struct{}
+	isRunning       bool
+	state           *state.Flogo
 }
 
 func newFlogoStateManager() flogoStateManager {
 	return flogoStateManager{
-		chanToBuild:         make(chan struct{}),
-		chanBuilderEvents:   make(chan EventBuilder),
-		chanRunnerEvents:    make(chan EventRunner),
-		chanRunnerRestart:   make(chan struct{}),
-		chanSomethingDied:   make(chan error),
-		chanWebserverChange: make(chan *stateFlogo, 10),
-		isRunning:           true,
-		state: stateFlogo{
-			builder: &stateBuilder{
-				buildPrevious: nil,
-				buildCurrent:  nil,
-				status:        statusBuilderOK,
+		chanDoRunner:    make(chan struct{}),
+		chanDoUI:        make(chan *state.Flogo),
+		chanDoWebserver: make(chan *state.Flogo),
+		chanOnBuilder:   make(chan EventBuilder),
+		chanOnRunner:    make(chan EventRunner),
+		chanOnUI:        make(chan ui.Event),
+		chanOnWatcher:   make(chan struct{}),
+		isRunning:       true,
+		state: &state.Flogo{
+			Builder: &state.Builder{
+				BuildPrevious: nil,
+				BuildCurrent:  nil,
+				Status:        state.StatusBuilderOK,
 			},
-			runner: &stateRunner{
-				runPrevious: nil,
-				runCurrent:  nil,
-				status:      statusRunnerWaiting,
+			Runner: &state.Runner{
+				RunPrevious: nil,
+				RunCurrent:  nil,
+				Status:      state.StatusRunnerWaiting,
 			},
 		},
 	}
 }
 
-func (mgr *flogoStateManager) Run(bind string, target string, enable_tui bool) error {
+func (mgr *flogoStateManager) Run(root_logger zerolog.Logger, u ui.UI, bind string, target string) error {
 	// Create a context that we can cancel for signaling all goroutines to clean up
-	ctx, cancel := context.WithCancel(log.With().Logger().WithContext(context.Background()))
+	logger := root_logger.With().Caller().Logger()
+	ctx, cancel := context.WithCancel(root_logger.With().Logger().WithContext(context.Background()))
 	defer cancel()
 
 	// Create channels for goroutine comms
 
 	watcher := Watcher{
-		OnBuild: mgr.chanToBuild,
+		OnEvent: mgr.chanOnWatcher,
 		Target:  target,
 	}
 	go func() {
 		err := watcher.Run(ctx)
 		if err != nil {
-			mgr.chanSomethingDied <- fmt.Errorf("watcher died: %w", err)
+			logger.Error().Err(err).Msg("watcher died")
+			os.Exit(10)
 		}
 	}()
 
 	builder := Builder{
 		Debounce: time.Millisecond * 300,
-		OnEvent:  mgr.chanBuilderEvents,
+		OnEvent:  mgr.chanOnBuilder,
 		Target:   target,
-		ToBuild:  mgr.chanToBuild,
+		ToBuild:  mgr.chanDoBuilder,
 	}
 	go func() {
 		err := builder.Run(ctx)
 		if err != nil {
-			mgr.chanSomethingDied <- fmt.Errorf("builder died: %w", err)
+			logger.Error().Err(err).Msg("builder died")
+			os.Exit(11)
 		}
 	}()
-	mgr.chanToBuild <- struct{}{}
 
 	runner := Runner{
-		DoRestart: mgr.chanRunnerRestart,
-		OnDeath:   mgr.chanSomethingDied,
-		OnEvent:   mgr.chanRunnerEvents,
+		DoRestart: mgr.chanDoRunner,
+		OnEvent:   mgr.chanOnRunner,
 		Target:    target,
 	}
 	go func() {
 		err := runner.Run(ctx)
 		if err != nil {
-			mgr.chanSomethingDied <- fmt.Errorf("runner died: %w", err)
+			logger.Error().Err(err).Msg("runner died")
+			os.Exit(12)
 		}
 	}()
 
-	// Start the UI in a goroutine
-
-	var u *ui
-	if enable_tui {
-		var err error
-		u, err = newUI(target, *upstreamURL)
-		if err != nil {
-			return fmt.Errorf("Failed to create UI: %w\n", err)
-		}
-		defer u.Fini()
-	}
-
 	// Start the web server
-	ws := NewWebserver(mgr.chanWebserverChange)
-	go ws.Start(ctx, bind, *upstreamURL)
+	ws := NewWebserver()
+	go func() {
+		err := ws.Run(ctx, mgr.chanDoWebserver, bind, *upstreamURL)
+		if err != nil {
+			logger.Error().Err(err).Msg("webserver died")
+			os.Exit(13)
+		}
+	}()
+	// Start the UI in a goroutine
+	go func() {
+		err := u.Run(ctx, mgr.chanOnUI, mgr.chanDoUI)
+		if err != nil {
+			logger.Error().Err(err).Msg("ui died")
+			os.Exit(14)
+		}
+	}()
+	defer u.Close()
 
-	var chan_event_ui chan tcell.Event
-	if u != nil {
-		chan_event_ui = u.EventQ()
-	}
-	var cause_of_death error
+	logger.Debug().Msg("Entering state lopp")
 	for mgr.isRunning {
-		if u != nil {
-			u.Redraw(&mgr.state)
-		}
+		//mgr.chanDoUI <- mgr.state
 		select {
-		case cause_of_death = <-mgr.chanSomethingDied:
-			log.Error().Err(cause_of_death).Msg("something died")
-			mgr.isRunning = false
-		case evt := <-mgr.chanBuilderEvents:
-			mgr.handleEventBuilder(evt)
-		case evt := <-mgr.chanRunnerEvents:
-			mgr.handleEventRunner(evt)
-		case evt := <-chan_event_ui:
-			mgr.handleEventUI(u, evt)
+		case evt := <-mgr.chanOnBuilder:
+			mgr.handleEventBuilder(logger, evt)
+			mgr.chanDoUI <- mgr.state
+		case evt := <-mgr.chanOnRunner:
+			mgr.handleEventRunner(logger, evt)
+			mgr.chanDoUI <- mgr.state
+		case evt := <-mgr.chanOnUI:
+			mgr.handleEventUI(logger, u, evt)
 		}
-		mgr.updateWebserver()
+		//mgr.chanDoWebserver <- mgr.state
 	}
-	log.Debug().Msg("exiting state run loop")
+	logger.Debug().Msg("exiting state run loop")
 	cancel()
-	u.Fini()
-	if cause_of_death != nil {
-		return fmt.Errorf("Instadeath: %w", cause_of_death)
-	}
 	return nil
 }
-func (mgr *flogoStateManager) handleEventBuilder(evt EventBuilder) {
+func (mgr *flogoStateManager) debugState(logger zerolog.Logger) {
+	for k, p := range map[string]*state.Process{
+		"builder.cur":  mgr.state.Builder.BuildCurrent,
+		"builder.prev": mgr.state.Builder.BuildPrevious,
+		"runner.cur":   mgr.state.Runner.RunCurrent,
+		"runner.prev":  mgr.state.Runner.RunPrevious,
+	} {
+		if p == nil {
+			logger.Info().Str("proc", k).Msg("nil")
+			continue
+		}
+		status := "nil"
+		if p.ExitCode != nil {
+			status = fmt.Sprintf("%d", *p.ExitCode)
+		}
+		logger.Info().
+			Str("proc", k).
+			Str("status", status).
+			Bytes("output", p.Output).
+			Bytes("stderr", p.Stderr).
+			Bytes("stdout", p.Stdout).
+			Send()
+
+	}
+
+}
+func (mgr *flogoStateManager) handleEventBuilder(logger zerolog.Logger, evt EventBuilder) {
 	switch evt.Type {
 	case EventBuildOutput:
-		log.Debug().Msg("build output")
-		mgr.state.builder.buildCurrent = evt.Process
+		//logger.Debug().Msg("build output")
+		mgr.state.Builder.BuildCurrent = evt.Process
 	case EventBuildFailure:
-		log.Debug().Msg("build failure")
-		mgr.state.builder.status = statusBuilderFailed
-		mgr.state.builder.buildCurrent = evt.Process
+		logger.Debug().Msg("build failure")
+		mgr.state.Builder.Status = state.StatusBuilderFailed
+		mgr.state.Builder.BuildCurrent = evt.Process
 	case EventBuildStart:
-		log.Debug().Msg("build start")
-		mgr.state.builder.status = statusBuilderCompiling
-		mgr.state.builder.buildPrevious = mgr.state.builder.buildCurrent
+		logger.Debug().Msg("build start")
+		mgr.state.Builder.Status = state.StatusBuilderCompiling
+		mgr.state.Builder.BuildPrevious = mgr.state.Builder.BuildCurrent
 	case EventBuildSuccess:
-		log.Debug().Msg("build success")
-		mgr.state.builder.status = statusBuilderOK
-		mgr.state.builder.buildCurrent = evt.Process
-		mgr.chanRunnerRestart <- struct{}{}
+		logger.Debug().Msg("build success")
+		mgr.state.Builder.Status = state.StatusBuilderOK
+		mgr.state.Builder.BuildCurrent = evt.Process
+		mgr.chanDoRunner <- struct{}{}
 	default:
-		log.Debug().Msg("build unknown")
+		logger.Debug().Msg("build unknown")
 	}
 }
-func (mgr *flogoStateManager) handleEventRunner(evt EventRunner) {
+func (mgr *flogoStateManager) handleEventRunner(logger zerolog.Logger, evt EventRunner) {
 	switch evt.Type {
 	case EventRunnerOutput:
-		log.Debug().Msg("runner output")
-		mgr.state.runner.runCurrent = evt.Process
+		mgr.state.Runner.RunCurrent = evt.Process
+		logger.Debug().Msg("runner output")
+		p := evt.Process
+		logger.Info().
+			Bytes("output", p.Output).
+			Bytes("stderr", p.Stderr).
+			Bytes("stdout", p.Stdout).
+			Send()
+		mgr.debugState(logger)
 	case EventRunnerStart:
-		log.Debug().Msg("runner start")
-		mgr.state.runner.status = statusRunnerRunning
-		mgr.state.runner.runCurrent = evt.Process
+		logger.Debug().Msg("runner start")
+		mgr.state.Runner.Status = state.StatusRunnerRunning
+		mgr.state.Runner.RunCurrent = evt.Process
 	case EventRunnerStopOK:
-		log.Debug().Msg("runner stop ok")
-		mgr.state.runner.status = statusRunnerStopOK
+		logger.Debug().Msg("runner stop ok")
+		mgr.state.Runner.Status = state.StatusRunnerStopOK
 	case EventRunnerStopErr:
-		log.Debug().Msg("runner stop err")
-		mgr.state.runner.status = statusRunnerStopErr
+		logger.Debug().Msg("runner stop err")
+		mgr.state.Runner.Status = state.StatusRunnerStopErr
 	case EventRunnerWaiting:
-		log.Debug().Msg("runner waiting")
-		mgr.state.runner.status = statusRunnerStopErr
+		logger.Debug().Msg("runner waiting")
+		mgr.state.Runner.Status = state.StatusRunnerStopErr
 	default:
-		log.Debug().Msg("runner unknown")
+		logger.Debug().Msg("runner unknown")
 	}
 }
-func (mgr *flogoStateManager) handleEventUI(u *ui, evt tcell.Event) {
-	switch ev := evt.(type) {
-	case *tcell.EventClipboard:
-		log.Info().Msg("event clipboard")
-	case *tcell.EventError:
-		log.Info().Msg("event error")
-	case *tcell.EventFocus:
-		log.Info().Msg("event focus")
-	case *tcell.EventInterrupt:
-		log.Info().Msg("event interrupt")
-	case *tcell.EventKey:
-		log.Info().Msg("event key")
-		if ev.Key() == tcell.KeyCtrlC {
-			log.Debug().Msg("SIGINT, exiting")
-			mgr.isRunning = false
-		} else {
-			log.Debug().Msg("updating webserver from keypress")
-			mgr.updateWebserver()
-		}
-	case *tcell.EventMouse:
-		log.Info().Msg("event mouse")
-	case *tcell.EventPaste:
-		log.Info().Msg("event paste")
-	case *tcell.EventResize:
-		log.Info().Msg("event resize")
-		u.Redraw(&mgr.state)
-		u.Sync()
-	case *tcell.EventTime:
-		log.Info().Msg("event time")
-	default:
-		t := reflect.TypeOf(evt)
-		if t == nil {
-			log.Info().Msg("unrecognized nil event")
-		} else {
-			log.Info().Str("type", t.Name()).Msg("unrecognized event")
-		}
+func (mgr *flogoStateManager) handleEventUI(logger zerolog.Logger, u ui.UI, evt ui.Event) {
+	switch evt.Type {
+	case ui.EventExit:
+		mgr.isRunning = false
 	}
-}
-func (mgr *flogoStateManager) updateWebserver() {
-	mgr.chanWebserverChange <- &mgr.state
 }

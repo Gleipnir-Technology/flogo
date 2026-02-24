@@ -2,6 +2,8 @@ package process
 
 import (
 	"sync"
+
+	"github.com/rs/zerolog/log"
 )
 
 type SubscriptionManager[T any] struct {
@@ -28,13 +30,14 @@ func (m *SubscriptionManager[T]) Publish(t T) {
 		select {
 		case sub.C <- t:
 		default:
+			log.Warn().Msg("failed to publish to subscription")
 			// Channel full, drop event or handle differently
 		}
 	}
 }
 func (m *SubscriptionManager[T]) Subscribe() *Subscription[T] {
 	sub := &Subscription[T]{
-		C:       make(chan T, 10), // buffered
+		C:       make(chan T, 10), // buffered so we can start the process immediately and then handle events
 		manager: m,
 	}
 	m.mu.Lock()

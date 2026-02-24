@@ -12,13 +12,13 @@ import (
 )
 
 type Watcher struct {
-	OnBuild chan<- struct{}
+	OnEvent chan<- struct{}
 	Target  string
 }
 
 func (w Watcher) Run(ctx context.Context) error {
 	// Create a new watcher
-	logger := log.Ctx(ctx).With().Str("component", "watcher").Logger()
+	logger := log.Ctx(ctx).With().Caller().Logger()
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("Failed to create new watcher: %w", err)
@@ -42,7 +42,7 @@ func (w Watcher) Run(ctx context.Context) error {
 
 		// Add directories to watch
 		if info.IsDir() {
-			logger.Debug().Str("path", path).Msg("add to watch list")
+			//logger.Debug().Str("path", path).Msg("add to watch list")
 			return watcher.Add(path)
 		}
 		return nil
@@ -52,7 +52,7 @@ func (w Watcher) Run(ctx context.Context) error {
 		return fmt.Errorf("Failed to walk filepath: %w", err)
 	}
 
-	logger.Info().Str("target", w.Target).Msg("Watcher started. Monitoring for changes...")
+	logger.Info().Str("target", w.Target).Msg("Started watcher loop")
 	for {
 		select {
 		case event, ok := <-watcher.Events:
@@ -69,7 +69,7 @@ func (w Watcher) Run(ctx context.Context) error {
 				typestring := eventToString(event)
 				logger.Debug().Str("name", event.Name).Str("type", typestring).Msg("notify event")
 
-				w.OnBuild <- struct{}{}
+				w.OnEvent <- struct{}{}
 			}
 
 		case err, ok := <-watcher.Errors:

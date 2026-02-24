@@ -10,16 +10,27 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
+type EventProcessType int
+
+const (
+	EventProcessOutput EventProcessType = iota
+	EventProcessStart
+	EventProcessStop
+)
+
+type EventProcess struct {
+	Data         []byte
+	ProcessState *os.ProcessState
+	Type         EventProcessType
+}
 type Process struct {
 	// Contains the exit code after the program exits
 	ExitCode *int
-	OnOutput *SubscriptionManager[[]byte]
-	OnStderr *SubscriptionManager[[]byte]
-	OnStdout *SubscriptionManager[[]byte]
-	OnExit   *SubscriptionManager[*os.ProcessState]
-	OnStart  *SubscriptionManager[struct{}]
+	OnEvent  *SubscriptionManager[EventProcess]
 	// Contains the interleaved total output emitted by this process
 	Output bytes.Buffer
 	// Contains all of stdeer that has been emitted by this process
@@ -40,18 +51,14 @@ type Process struct {
 func New(target string, args ...string) *Process {
 	return &Process{
 		ExitCode:   nil,
-		OnExit:     NewSubscriptionManager[*os.ProcessState](),
-		OnOutput:   NewSubscriptionManager[[]byte](),
-		OnStart:    NewSubscriptionManager[struct{}](),
-		OnStderr:   NewSubscriptionManager[[]byte](),
-		OnStdout:   NewSubscriptionManager[[]byte](),
+		OnEvent:    NewSubscriptionManager[EventProcess](),
 		Stdout:     bytes.Buffer{},
 		Stderr:     bytes.Buffer{},
 		args:       args,
-		chanExit:   make(chan *os.ProcessState, 1),
-		chanStart:  make(chan struct{}, 1),
-		chanStderr: make(chan []byte, 10),
-		chanStdout: make(chan []byte, 10),
+		chanExit:   make(chan *os.ProcessState),
+		chanStart:  make(chan struct{}),
+		chanStderr: make(chan []byte),
+		chanStdout: make(chan []byte),
 		cmd:        nil,
 		target:     target,
 	}
@@ -104,12 +111,28 @@ func (p *Process) Start(ctx context.Context) error {
 		return errors.New("Failed to get stderr pipe")
 	}
 
+	// Start the command (non-blocking) and signal command start
+	if err := p.cmd.Start(); err != nil {
+		p.cmd = nil
+		return fmt.Errorf("Failed to start '%s': %w", p.target, err)
+	}
+	log.Debug().Str("target", p.target).Msg("process should start")
+	select {
+	case p.chanStart <- struct{}{}:
+	default:
+	}
+	p.OnEvent.Publish(EventProcess{
+		Data:         []byte{},
+		ProcessState: nil,
+		Type:         EventProcessStart,
+	})
+
 	// Read stdout line by line
 	scanner := bufio.NewScanner(stdout)
 	go func() {
 		for scanner.Scan() {
 			b := scanner.Bytes()
-			p.onStream(p.OnStdout, &p.Stdout, p.chanStdout, b)
+			p.onStream(&p.Stdout, p.chanStdout, b)
 		}
 	}()
 
@@ -118,15 +141,9 @@ func (p *Process) Start(ctx context.Context) error {
 	go func() {
 		for stderrScanner.Scan() {
 			b := stderrScanner.Bytes()
-			p.onStream(p.OnStderr, &p.Stderr, p.chanStderr, b)
+			p.onStream(&p.Stderr, p.chanStderr, b)
 		}
 	}()
-
-	// Start the command (non-blocking)
-	if err := p.cmd.Start(); err != nil {
-		p.cmd = nil
-		return fmt.Errorf("Failed to start '%s': %w", p.target, err)
-	}
 
 	// Wait for the command to finish
 	go func() {
@@ -138,14 +155,13 @@ func (p *Process) Start(ctx context.Context) error {
 		case p.chanExit <- s:
 		default:
 		}
-		p.OnExit.Publish(s)
+		p.OnEvent.Publish(EventProcess{
+			Data:         []byte{},
+			ProcessState: s,
+			Type:         EventProcessStop,
+		})
 		p.cmd = nil
 	}()
-	select {
-	case p.chanStart <- struct{}{}:
-	default:
-	}
-	p.OnStart.Publish(struct{}{})
 	return nil
 }
 
@@ -159,11 +175,12 @@ func (p *Process) Stop() {
 	case <-p.chanExit:
 	case <-time.After(time.Second * 3):
 		if p.cmd != nil {
+			log.Info().Msg("Sent SIGKILL")
 			p.Signal(syscall.SIGKILL)
 		}
 	}
 }
-func (p *Process) onStream(mgr *SubscriptionManager[[]byte], buf *bytes.Buffer, c chan<- []byte, b []byte) {
+func (p *Process) onStream(buf *bytes.Buffer, c chan<- []byte, b []byte) {
 	buf.Write(b)
 	buf.Write([]byte("\n"))
 	p.Output.Write(b)
@@ -172,6 +189,10 @@ func (p *Process) onStream(mgr *SubscriptionManager[[]byte], buf *bytes.Buffer, 
 	case c <- b:
 	default:
 	}
-	mgr.Publish(b)
-	p.OnOutput.Publish(b)
+
+	p.OnEvent.Publish(EventProcess{
+		Data:         b,
+		ProcessState: nil,
+		Type:         EventProcessOutput,
+	})
 }

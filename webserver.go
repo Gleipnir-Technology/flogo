@@ -10,8 +10,9 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/Gleipnir-Technology/flogo/state"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	//"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog/log"
 )
 
@@ -27,18 +28,20 @@ type MessageSSE struct {
 }
 type MessageProcess struct {
 	ExitCode *int   `json:"exit_code"`
+	Output   string `json:"output"`
 	Stdout   string `json:"stdout"`
 	Stderr   string `json:"stderr"`
 }
 
-func newMessageProcess(state *stateProcess) *MessageProcess {
-	if state == nil {
+func newMessageProcess(s *state.Process) *MessageProcess {
+	if s == nil {
 		return nil
 	}
 	return &MessageProcess{
-		ExitCode: state.exitCode,
-		Stderr:   string(state.stderr),
-		Stdout:   string(state.stdout),
+		ExitCode: s.ExitCode,
+		Output:   string(s.Output),
+		Stderr:   string(s.Stderr),
+		Stdout:   string(s.Stdout),
 	}
 }
 
@@ -52,22 +55,22 @@ type MessageState struct {
 	RunnerStatus  MessageStatus `json:"runner"`
 }
 type SSEConnection struct {
-	chanState chan *stateFlogo
+	chanState chan *state.Flogo
 	id        string
 }
 
-func (c *SSEConnection) SendState(w http.ResponseWriter, state *stateFlogo) error {
+func (c *SSEConnection) SendState(w http.ResponseWriter, s *state.Flogo) error {
 	return send(w, MessageSSE{
 		Content: MessageState{
 			BuilderStatus: MessageStatus{
-				ProcessCurrent:  newMessageProcess(state.builder.buildCurrent),
-				ProcessPrevious: newMessageProcess(state.builder.buildPrevious),
-				Status:          StatusStringBuilder(state.builder.status),
+				ProcessCurrent:  newMessageProcess(s.Builder.BuildCurrent),
+				ProcessPrevious: newMessageProcess(s.Builder.BuildPrevious),
+				Status:          state.StatusStringBuilder(s.Builder.Status),
 			},
 			RunnerStatus: MessageStatus{
-				ProcessCurrent:  newMessageProcess(state.runner.runCurrent),
-				ProcessPrevious: newMessageProcess(state.runner.runPrevious),
-				Status:          StatusStringRunner(state.runner.status),
+				ProcessCurrent:  newMessageProcess(s.Runner.RunCurrent),
+				ProcessPrevious: newMessageProcess(s.Runner.RunPrevious),
+				Status:          state.StatusStringRunner(s.Runner.Status),
 			},
 		},
 		Type: "state",
@@ -97,22 +100,20 @@ func send[T any](w http.ResponseWriter, msg T) error {
 }
 
 type Webserver struct {
-	chanStateChange <-chan *stateFlogo
-	connections     map[*SSEConnection]bool
+	connections map[*SSEConnection]bool
 }
 
-func NewWebserver(stateChange <-chan *stateFlogo) *Webserver {
+func NewWebserver() *Webserver {
 	return &Webserver{
-		chanStateChange: stateChange,
-		connections:     make(map[*SSEConnection]bool, 0),
+		connections: make(map[*SSEConnection]bool, 0),
 	}
 }
-func (web *Webserver) Start(ctx context.Context, bind string, upstream url.URL) {
+func (web *Webserver) Run(ctx context.Context, chanOnState <-chan *state.Flogo, bind string, upstream url.URL) error {
 	logger := log.Ctx(ctx)
 	r := chi.NewRouter()
 
 	//r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	//r.Use(middleware.Recoverer)
 
 	proxy := httputil.NewSingleHostReverseProxy(upstreamURL)
 
@@ -132,17 +133,17 @@ func (web *Webserver) Start(ctx context.Context, bind string, upstream url.URL) 
 		proxy.ServeHTTP(w, r)
 	}))
 
-	go web.fanoutStateChanges(ctx)
-	logger.Info().Str("bind", bind).Msg("webserver starting")
-	http.ListenAndServe(bind, r)
+	go web.fanoutStateChanges(ctx, chanOnState)
+	logger.Info().Str("bind", bind).Msg("Started webserver loop")
+	return http.ListenAndServe(bind, r)
 }
 
-func (web *Webserver) fanoutStateChanges(ctx context.Context) {
+func (web *Webserver) fanoutStateChanges(ctx context.Context, chanOnState <-chan *state.Flogo) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case state := <-web.chanStateChange:
+		case state := <-chanOnState:
 			for c, _ := range web.connections {
 				c.chanState <- state
 			}
@@ -159,7 +160,7 @@ func (web *Webserver) sseHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	connection := SSEConnection{
-		chanState: make(chan *stateFlogo, 10),
+		chanState: make(chan *state.Flogo),
 		id:        fmt.Sprintf("%d", time.Now().UnixNano()),
 	}
 	web.connections[&connection] = true

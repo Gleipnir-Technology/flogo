@@ -6,19 +6,15 @@ import (
 	"net/url"
 	"os"
 	"runtime/debug"
-	"time"
 
-	"github.com/rs/zerolog"
+	"github.com/Gleipnir-Technology/flogo/ui"
 	"github.com/rs/zerolog/log"
 )
 
 func main() {
 	var err error
-	disable_tui := os.Getenv("FLOGO_DISABLE_TUI")
-	enable_tui := true
-	if disable_tui != "" {
-		enable_tui = false
-	}
+	ui_type := os.Getenv("FLOGO_UI")
+
 	var target = flag.String("target", ".", "The directory containing the go project to build")
 	flag.Parse()
 
@@ -32,7 +28,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer file.Close()
-	setupLogging(file)
+	logger := setupLogging(file)
 
 	bind := os.Getenv("FLOGO_BIND")
 	if bind == "" {
@@ -49,10 +45,23 @@ func main() {
 		fmt.Printf("Failed to parse '%s' as a URL: %v\n", upstream, err)
 		os.Exit(2)
 	}
+	var u ui.UI
+	switch ui_type {
+	case "", "tcell":
+		u, err = ui.NewTUI(*target, *upstreamURL)
+	case "flat":
+		u, err = ui.NewFlat(*target, *upstreamURL)
+	default:
+		fmt.Printf("Unrecognized FLOGO_UI '%s'\n", ui_type)
+		os.Exit(3)
+	}
+	if err != nil {
+		fmt.Printf("Failed to create UI: %+v\n", err)
+		os.Exit(4)
+	}
 	// Handle keyboard input
 	//c := make(chan os.Signal, 1)
 	//signal.Notify(c, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	log.Info().Msg("entering main loop")
 
 	// Keep track of the state of everything
 	mgr := newFlogoStateManager()
@@ -67,7 +76,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "PANIC: %v\n%s\n", r, debug.Stack())
 		}
 	}()
-	err = mgr.Run(bind, *target, enable_tui)
+	err = mgr.Run(logger, u, bind, *target)
 	if err != nil {
 		fmt.Printf("%+v", err)
 		os.Exit(1)
@@ -75,38 +84,4 @@ func main() {
 }
 func reload() {
 	log.Info().Msg("fake reload")
-}
-func setupLogging(file *os.File) {
-	if os.Getenv("FLOGO_VERBOSE") != "" {
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	} else {
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	}
-
-	// Track start time for delta timestamps
-	startTime := time.Now()
-
-	writer := zerolog.ConsoleWriter{
-		Out:        file,
-		TimeFormat: "15:04:05", // placeholder, will be overridden
-		NoColor:    false,      // Enable colors for tail -f
-	}
-
-	// Custom timestamp formatter showing elapsed time
-	writer.FormatTimestamp = func(i any) string {
-		elapsed := time.Since(startTime)
-
-		hours := int(elapsed.Hours())
-		minutes := int(elapsed.Minutes()) % 60
-		seconds := int(elapsed.Seconds()) % 60
-		millis := int(elapsed.Milliseconds()) % 1000
-
-		return fmt.Sprintf("\x1b[90m[+%02d:%02d:%02d.%03d]\x1b[0m",
-			hours, minutes, seconds, millis)
-	}
-
-	// Create logger with timestamp
-	log.Logger = zerolog.New(writer).With().Timestamp().Str("component", "main").Logger()
-
-	log.Debug().Msg("Running in verbose mode due to FLOGO_VERBOSE")
 }
