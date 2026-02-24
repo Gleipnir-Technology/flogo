@@ -209,9 +209,11 @@ func (mgr *flogoStateManager) handleEventRunner(logger zerolog.Logger, evt Event
 	case EventRunnerStopOK:
 		logger.Debug().Msg("runner stop ok")
 		mgr.state.Runner.Status = state.StatusRunnerStopOK
+		mgr.state.Runner.RunPrevious = mgr.state.Runner.RunCurrent
 	case EventRunnerStopErr:
 		logger.Debug().Msg("runner stop err")
 		mgr.state.Runner.Status = state.StatusRunnerStopErr
+		mgr.state.Runner.RunPrevious = mgr.state.Runner.RunCurrent
 	case EventRunnerWaiting:
 		logger.Debug().Msg("runner waiting")
 		mgr.state.Runner.Status = state.StatusRunnerStopErr
