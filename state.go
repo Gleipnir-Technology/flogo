@@ -105,20 +105,17 @@ func (mgr *flogoStateManager) Run(root_logger zerolog.Logger, u ui.UI, bind stri
 		}
 	}()
 
-	/*
-		// Start the web server
-		ws := NewWebserver()
-		go func() {
-			err := ws.Run(ctx, mgr.chanDoWebserver, bind, *upstreamURL)
-			if err != nil {
-				logger.Error().Err(err).Msg("webserver died")
-				os.Exit(13)
-			}
-		}()
-	*/
+	// Start the web server
+	ws := NewWebserver()
+	go func() {
+		err := ws.Run(ctx, mgr.chanDoWebserver, bind, *upstreamURL)
+		if err != nil {
+			logger.Error().Err(err).Msg("webserver died")
+			os.Exit(13)
+		}
+	}()
 
 	for mgr.isRunning {
-		//mgr.chanDoUI <- mgr.state
 		select {
 		case f := <-mgr.chanOnWatcher:
 			go func() {
@@ -128,11 +125,13 @@ func (mgr *flogoStateManager) Run(root_logger zerolog.Logger, u ui.UI, bind stri
 			mgr.handleEventBuilder(logger, evt)
 			go func() {
 				mgr.chanDoUI <- mgr.state
+				mgr.chanDoWebserver <- mgr.state
 			}()
 		case evt := <-mgr.chanOnRunner:
 			mgr.handleEventRunner(logger, evt)
 			go func() {
 				mgr.chanDoUI <- mgr.state
+				mgr.chanDoWebserver <- mgr.state
 			}()
 		case evt := <-mgr.chanOnUI:
 			mgr.handleEventUI(logger, u, evt)
