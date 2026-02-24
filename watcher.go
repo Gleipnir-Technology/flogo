@@ -12,7 +12,7 @@ import (
 )
 
 type Watcher struct {
-	OnEvent chan<- struct{}
+	OnEvent chan<- string
 	Target  string
 }
 
@@ -42,7 +42,7 @@ func (w Watcher) Run(ctx context.Context) error {
 
 		// Add directories to watch
 		if info.IsDir() {
-			//logger.Debug().Str("path", path).Msg("add to watch list")
+			logger.Debug().Str("path", path).Msg("add to watch list")
 			return watcher.Add(path)
 		}
 		return nil
@@ -69,7 +69,9 @@ func (w Watcher) Run(ctx context.Context) error {
 				typestring := eventToString(event)
 				logger.Debug().Str("name", event.Name).Str("type", typestring).Msg("notify event")
 
-				w.OnEvent <- struct{}{}
+				go func() {
+					w.OnEvent <- event.Name
+				}()
 			}
 
 		case err, ok := <-watcher.Errors:

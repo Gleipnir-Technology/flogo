@@ -51,6 +51,7 @@ func (u *uiTcell) Events() <-chan Event {
 func (u *uiTcell) Run(ctx context.Context, chanOnEvent chan<- Event, chanNewState <-chan *state.Flogo) error {
 	logger := log.Ctx(ctx).With().Caller().Logger()
 	logger.Info().Msg("Started ui loop")
+	u.drawInitial()
 	for {
 		u.screen.Show()
 		select {
@@ -68,6 +69,9 @@ func (u *uiTcell) Run(ctx context.Context, chanOnEvent chan<- Event, chanNewStat
 			u.redraw(s)
 		}
 	}
+}
+func (u *uiTcell) drawInitial() {
+	u.drawText(0, 0, tcell.StyleDefault.Foreground(color.Yellow).Bold(true), "Starting up...")
 }
 func (u *uiTcell) redraw(s *state.Flogo) {
 	if s == nil {

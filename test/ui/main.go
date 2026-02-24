@@ -55,7 +55,7 @@ func main() {
 		select {
 		case <-ticker.C:
 			counter++
-			state.Runner.RunCurrent.Output = []byte(fmt.Sprintf("%d", counter))
+			state.Runner.RunCurrent.Output = fmt.Appendf(state.Runner.RunCurrent.Output, "%d", counter)
 			do_ui <- state
 		case evt := <-on_ui:
 			switch evt.Type {

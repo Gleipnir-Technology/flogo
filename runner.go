@@ -30,7 +30,6 @@ type EventRunner struct {
 }
 type Runner struct {
 	DoRestart <-chan struct{}
-	OnDeath   chan<- error
 	OnEvent   chan<- EventRunner
 	Target    string
 }
@@ -63,6 +62,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		logger.Warn().Err(err).Msg("failed to start runner process")
 	}
+	logger.Debug().Msg("Triggered initial runner process")
 	for {
 		select {
 		case <-ctx.Done():
@@ -84,8 +84,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			logger.Info().Msg("Restart signal received, restarting process...")
 			err := p.Restart(ctx)
 			if err != nil {
-				r.OnDeath <- fmt.Errorf("runner restart err: %w", err)
-				return nil
+				return fmt.Errorf("runner restart err: %w", err)
 			}
 		}
 	}
@@ -123,7 +122,6 @@ func (r *Runner) onOutput(logger zerolog.Logger, b []byte, p *process.Process) {
 	}
 }
 func (r *Runner) onStart(logger zerolog.Logger) {
-	logger.Debug().Msg("Runner's process started")
 	r.OnEvent <- EventRunner{
 		Process: nil,
 		Type:    EventRunnerStart,

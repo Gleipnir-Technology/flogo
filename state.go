@@ -12,27 +12,28 @@ import (
 )
 
 type flogoStateManager struct {
-	chanDoBuilder   chan struct{}
+	chanDoBuilder   chan string
 	chanDoRunner    chan struct{}
 	chanDoUI        chan *state.Flogo
 	chanDoWebserver chan *state.Flogo
 	chanOnBuilder   chan EventBuilder
 	chanOnRunner    chan EventRunner
 	chanOnUI        chan ui.Event
-	chanOnWatcher   chan struct{}
+	chanOnWatcher   chan string
 	isRunning       bool
 	state           *state.Flogo
 }
 
 func newFlogoStateManager() flogoStateManager {
 	return flogoStateManager{
+		chanDoBuilder:   make(chan string),
 		chanDoRunner:    make(chan struct{}),
 		chanDoUI:        make(chan *state.Flogo),
 		chanDoWebserver: make(chan *state.Flogo),
 		chanOnBuilder:   make(chan EventBuilder),
 		chanOnRunner:    make(chan EventRunner),
 		chanOnUI:        make(chan ui.Event),
-		chanOnWatcher:   make(chan struct{}),
+		chanOnWatcher:   make(chan string),
 		isRunning:       true,
 		state: &state.Flogo{
 			Builder: &state.Builder{
@@ -55,8 +56,17 @@ func (mgr *flogoStateManager) Run(root_logger zerolog.Logger, u ui.UI, bind stri
 	ctx, cancel := context.WithCancel(root_logger.With().Logger().WithContext(context.Background()))
 	defer cancel()
 
-	// Create channels for goroutine comms
+	// Start the UI in a goroutine
+	go func() {
+		err := u.Run(ctx, mgr.chanOnUI, mgr.chanDoUI)
+		if err != nil {
+			logger.Error().Err(err).Msg("ui died")
+			os.Exit(14)
+		}
+	}()
+	defer u.Close()
 
+	// Create channels for goroutine comms
 	watcher := Watcher{
 		OnEvent: mgr.chanOnWatcher,
 		Target:  target,
@@ -82,7 +92,6 @@ func (mgr *flogoStateManager) Run(root_logger zerolog.Logger, u ui.UI, bind stri
 			os.Exit(11)
 		}
 	}()
-
 	runner := Runner{
 		DoRestart: mgr.chanDoRunner,
 		OnEvent:   mgr.chanOnRunner,
@@ -96,41 +105,41 @@ func (mgr *flogoStateManager) Run(root_logger zerolog.Logger, u ui.UI, bind stri
 		}
 	}()
 
-	// Start the web server
-	ws := NewWebserver()
-	go func() {
-		err := ws.Run(ctx, mgr.chanDoWebserver, bind, *upstreamURL)
-		if err != nil {
-			logger.Error().Err(err).Msg("webserver died")
-			os.Exit(13)
-		}
-	}()
-	// Start the UI in a goroutine
-	go func() {
-		err := u.Run(ctx, mgr.chanOnUI, mgr.chanDoUI)
-		if err != nil {
-			logger.Error().Err(err).Msg("ui died")
-			os.Exit(14)
-		}
-	}()
-	defer u.Close()
+	/*
+		// Start the web server
+		ws := NewWebserver()
+		go func() {
+			err := ws.Run(ctx, mgr.chanDoWebserver, bind, *upstreamURL)
+			if err != nil {
+				logger.Error().Err(err).Msg("webserver died")
+				os.Exit(13)
+			}
+		}()
+	*/
 
-	logger.Debug().Msg("Entering state lopp")
 	for mgr.isRunning {
 		//mgr.chanDoUI <- mgr.state
 		select {
+		case f := <-mgr.chanOnWatcher:
+			go func() {
+				mgr.chanDoBuilder <- f
+			}()
 		case evt := <-mgr.chanOnBuilder:
 			mgr.handleEventBuilder(logger, evt)
-			mgr.chanDoUI <- mgr.state
+			go func() {
+				mgr.chanDoUI <- mgr.state
+			}()
 		case evt := <-mgr.chanOnRunner:
 			mgr.handleEventRunner(logger, evt)
-			mgr.chanDoUI <- mgr.state
+			go func() {
+				mgr.chanDoUI <- mgr.state
+			}()
 		case evt := <-mgr.chanOnUI:
 			mgr.handleEventUI(logger, u, evt)
 		}
 		//mgr.chanDoWebserver <- mgr.state
 	}
-	logger.Debug().Msg("exiting state run loop")
+	logger.Debug().Msg("Exiting state run loop")
 	cancel()
 	return nil
 }
@@ -186,14 +195,14 @@ func (mgr *flogoStateManager) handleEventRunner(logger zerolog.Logger, evt Event
 	switch evt.Type {
 	case EventRunnerOutput:
 		mgr.state.Runner.RunCurrent = evt.Process
-		logger.Debug().Msg("runner output")
+		//logger.Debug().Msg("runner output")
 		p := evt.Process
 		logger.Info().
 			Bytes("output", p.Output).
 			Bytes("stderr", p.Stderr).
 			Bytes("stdout", p.Stdout).
 			Send()
-		mgr.debugState(logger)
+		//mgr.debugState(logger)
 	case EventRunnerStart:
 		logger.Debug().Msg("runner start")
 		mgr.state.Runner.Status = state.StatusRunnerRunning

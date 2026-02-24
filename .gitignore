@@ -38,3 +38,4 @@ example/color/color
 example/emitter/emitter
 example/webserver/webserver
 test/runner/runner
+test/ui/ui

@@ -23,7 +23,7 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			counter++
+			counter = counter + 3
 			if counter%2 == 0 {
 				fmt.Printf("Counter: out %d\n", counter)
 			} else {

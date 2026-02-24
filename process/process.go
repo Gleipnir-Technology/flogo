@@ -39,8 +39,6 @@ type Process struct {
 	Stdout bytes.Buffer
 
 	args       []string
-	chanExit   chan *os.ProcessState
-	chanStart  chan struct{}
 	chanStderr chan []byte
 	chanStdout chan []byte
 	cmd        *exec.Cmd
@@ -55,8 +53,6 @@ func New(target string, args ...string) *Process {
 		Stdout:     bytes.Buffer{},
 		Stderr:     bytes.Buffer{},
 		args:       args,
-		chanExit:   make(chan *os.ProcessState),
-		chanStart:  make(chan struct{}),
 		chanStderr: make(chan []byte),
 		chanStdout: make(chan []byte),
 		cmd:        nil,
@@ -116,12 +112,8 @@ func (p *Process) Start(ctx context.Context) error {
 		p.cmd = nil
 		return fmt.Errorf("Failed to start '%s': %w", p.target, err)
 	}
-	log.Debug().Str("target", p.target).Msg("process should start")
-	select {
-	case p.chanStart <- struct{}{}:
-	default:
-	}
-	p.OnEvent.Publish(EventProcess{
+	log.Debug().Str("target", p.target).Msg("started process")
+	go p.OnEvent.Publish(EventProcess{
 		Data:         []byte{},
 		ProcessState: nil,
 		Type:         EventProcessStart,
@@ -151,11 +143,8 @@ func (p *Process) Start(ctx context.Context) error {
 		if err != nil {
 			fmt.Printf("Got error on cmd.Wait(): %v\n", err)
 		}
-		select {
-		case p.chanExit <- s:
-		default:
-		}
-		p.OnEvent.Publish(EventProcess{
+		log.Debug().Str("target", p.target).Msg("ended process")
+		go p.OnEvent.Publish(EventProcess{
 			Data:         []byte{},
 			ProcessState: s,
 			Type:         EventProcessStop,
@@ -168,17 +157,28 @@ func (p *Process) Start(ctx context.Context) error {
 // Signal the process to stop. Wait for it to complete, or for 3 seconds to pass, then
 // actively kill. This function does not return until the child is dead
 func (p *Process) Stop() {
+	sub_event := p.OnEvent.Subscribe()
+	defer sub_event.Close()
+
 	if p.cmd != nil {
 		p.SignalInterrupt()
 	}
-	select {
-	case <-p.chanExit:
-	case <-time.After(time.Second * 3):
-		if p.cmd != nil {
-			log.Info().Msg("Sent SIGKILL")
-			p.Signal(syscall.SIGKILL)
+	is_waiting := true
+	log.Debug().Str("target", p.target).Msg("Begin waiting for process stop")
+	for is_waiting {
+		select {
+		case evt := <-sub_event.C:
+			if evt.Type == EventProcessStop {
+				is_waiting = false
+			}
+		case <-time.After(time.Second * 3):
+			if p.cmd != nil {
+				log.Info().Msg("Sent SIGKILL")
+				p.Signal(syscall.SIGKILL)
+			}
 		}
 	}
+	log.Debug().Str("target", p.target).Msg("Done waiting for process stop")
 }
 func (p *Process) onStream(buf *bytes.Buffer, c chan<- []byte, b []byte) {
 	buf.Write(b)
@@ -190,7 +190,7 @@ func (p *Process) onStream(buf *bytes.Buffer, c chan<- []byte, b []byte) {
 	default:
 	}
 
-	p.OnEvent.Publish(EventProcess{
+	go p.OnEvent.Publish(EventProcess{
 		Data:         b,
 		ProcessState: nil,
 		Type:         EventProcessOutput,

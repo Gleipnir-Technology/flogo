@@ -28,10 +28,10 @@ type Builder struct {
 	Debounce time.Duration
 	OnEvent  chan<- EventBuilder
 	Target   string
-	ToBuild  <-chan struct{}
+	ToBuild  <-chan string
 }
 
-func (b Builder) Run(ctx context.Context) error {
+func (b *Builder) Run(ctx context.Context) error {
 	logger := log.Ctx(ctx).With().Caller().Logger()
 
 	debounce := newDebounce(ctx, b.Debounce)
@@ -49,17 +49,19 @@ func (b Builder) Run(ctx context.Context) error {
 			logger.Info().Msg("Shutdown builder")
 			return nil
 		case evt := <-sub_event.C:
+			logger.Info().Msg("builder sub event")
 			switch evt.Type {
 			case process.EventProcessStop:
-				b.onExit(logger, p, evt.ProcessState)
+				go b.onExit(logger, p, evt.ProcessState)
 			case process.EventProcessStart:
-				b.onStart(logger)
+				go b.onStart(logger)
 			case process.EventProcessOutput:
-				b.onOutput(logger, p, evt.Data)
+				go b.onOutput(logger, p, evt.Data)
 			default:
 				logger.Warn().Msg("unrecognized process event")
 			}
 		case <-b.ToBuild:
+			logger.Info().Msg("tobuild.")
 			debounce(func() {
 				logger.Info().Msg("rebuild.")
 				err := p.Start(ctx)
@@ -71,7 +73,7 @@ func (b Builder) Run(ctx context.Context) error {
 	}
 }
 
-func (b Builder) onOutput(logger zerolog.Logger, p *process.Process, buf []byte) {
+func (b *Builder) onOutput(logger zerolog.Logger, p *process.Process, buf []byte) {
 	logger.Debug().Bytes("b", buf).Msg("subprocess output")
 	b.OnEvent <- EventBuilder{
 		Process: &state.Process{
@@ -83,8 +85,7 @@ func (b Builder) onOutput(logger zerolog.Logger, p *process.Process, buf []byte)
 		Type: EventBuildOutput,
 	}
 }
-func (b Builder) onExit(logger zerolog.Logger, p *process.Process, s *os.ProcessState) {
-	logger.Debug().Msg("process exit")
+func (b *Builder) onExit(logger zerolog.Logger, p *process.Process, s *os.ProcessState) {
 	var t EventBuilderType
 	i := s.ExitCode()
 	if i == 0 {
@@ -102,8 +103,7 @@ func (b Builder) onExit(logger zerolog.Logger, p *process.Process, s *os.Process
 		Type: t,
 	}
 }
-func (b Builder) onStart(logger zerolog.Logger) {
-	logger.Debug().Msg("process started")
+func (b *Builder) onStart(logger zerolog.Logger) {
 	b.OnEvent <- EventBuilder{
 		Process: nil,
 		Type:    EventBuildStart,
