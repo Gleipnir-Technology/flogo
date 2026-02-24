@@ -61,9 +61,7 @@ func (b *Builder) Run(ctx context.Context) error {
 				logger.Warn().Msg("unrecognized process event")
 			}
 		case <-b.ToBuild:
-			logger.Info().Msg("tobuild.")
 			debounce(func() {
-				logger.Info().Msg("rebuild.")
 				err := p.Start(ctx)
 				if err != nil {
 					logger.Error().Err(err).Msg("failed to start")

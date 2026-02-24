@@ -91,7 +91,6 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 func (r *Runner) onExit(logger zerolog.Logger, p *process.Process, s *os.ProcessState) {
-	logger.Info().Msg("Runner's process exited")
 	var t EventRunnerType
 	i := s.ExitCode()
 	if i == 0 {
