@@ -214,7 +214,7 @@ func convertEvent(evt tcell.Event) Event {
 		return Event{Type: EventNone}
 	case *tcell.EventKey:
 		logger.Info().Msg("event key")
-		if ev.Key() == tcell.KeyCtrlC || ev.Key() == tcell.KeyEscape {
+		if ev.Key() == tcell.KeyCtrlC {
 			logger.Debug().Msg("SIGINT, exiting")
 			return Event{Type: EventExit}
 		} else if ev.Str() == " " {
