@@ -5,20 +5,21 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
-	"strings"
 	//"time"
 
 	"github.com/Gleipnir-Technology/flogo/state"
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
+	"github.com/leaanthony/go-ansi-parser"
 	"github.com/rs/zerolog/log"
 )
 
 type uiTcell struct {
-	onEvent  chan Event
-	screen   tcell.Screen
-	target   string
-	upstream url.URL
+	currentState *state.Flogo
+	onEvent      chan Event
+	screen       tcell.Screen
+	target       string
+	upstream     url.URL
 }
 
 func newUITcell(target string, upstream url.URL) (*uiTcell, error) {
@@ -64,27 +65,86 @@ func (u *uiTcell) Run(ctx context.Context, chanOnEvent chan<- Event, chanNewStat
 			if e.Type != EventNone {
 				chanOnEvent <- e
 			}
+			if e.Type == EventResize {
+				u.redraw()
+			}
 		case s := <-chanNewState:
 			logger.Debug().Msg("new ui state")
-			u.redraw(s)
+			u.currentState = s
+			u.redraw()
 		}
 	}
 }
+func (u *uiTcell) drawBytesMultiline(start_x, start_y int, buffer []byte) {
+	// If the bytes were ansi, convert them first
+	parsed, err := ansi.Parse(string(buffer))
+	if err != nil {
+		log.Error().Err(err).Msg("failed to parse ANSI")
+		return
+	}
+	// Convert from ANSI to tcell styles
+	converted, err := ansiToTcell(parsed)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to convert ANSI")
+		return
+	}
+	u.drawStyledMultilineBottom(start_x, start_y, converted)
+}
+func (u *uiTcell) drawStyledMultilineBottom(start_x, start_y int, text []*styledText) {
+	max_x, max_y := u.screen.Size()
+	sections, err := fitToScreen(start_x, start_y, max_x, max_y, text)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to fit to screen")
+		return
+	}
+	u.drawStyledTextBottom(start_x, start_y, sections)
+}
+
+// drawStyledText renders styled segments to the tcell screen
+func (u *uiTcell) drawStyledTextBottom(x_start, y_start int, lines [][]*styledText) {
+	x := x_start
+	_, y_max := u.screen.Size()
+	// We draw the lines in reverse order so we ensure we are seeing the latest output
+	y_count := y_max - y_start
+	lines_len := len(lines)
+	for y_offset := range y_count {
+		idx_base := max(lines_len-y_count, 0)
+		idx := idx_base + y_offset
+		if idx >= lines_len {
+			return
+		}
+		//log.Debug().Int("idx", idx).Int("lines_len", lines_len).Int("y_offset", y_offset).Send()
+		line := lines[idx]
+		y := y_start + y_offset
+		for _, seg := range line {
+			/*log.Debug().
+			Str("fg", style.GetForeground().String()).
+			Str("bg", style.GetBackground().String()).
+			Send()*/
+			for _, r := range seg.text {
+				u.screen.SetContent(x, y, r, nil, seg.style)
+				x++
+			}
+		}
+		x = x_start
+	}
+}
+
 func (u *uiTcell) drawInitial() {
 	u.drawText(0, 0, tcell.StyleDefault.Foreground(color.Yellow).Bold(true), "Starting up...")
 }
-func (u *uiTcell) redraw(s *state.Flogo) {
-	if s == nil {
+func (u *uiTcell) redraw() {
+	if u.currentState == nil {
 		return
 	}
 	u.screen.Clear()
 
 	// Draw title
-	u.drawTitle(s)
-	if s.Builder.Status != state.StatusBuilderOK {
-		u.drawBuildStatus(s.Builder)
+	u.drawTitle(u.currentState)
+	if u.currentState.Builder.Status != state.StatusBuilderOK {
+		u.drawBuildStatus(u.currentState.Builder)
 	} else {
-		u.drawRunning(s.Runner)
+		u.drawRunning(u.currentState.Runner)
 	}
 
 	u.screen.Show()
@@ -119,19 +179,37 @@ func (u *uiTcell) drawBuildStatus(s *state.Builder) {
 		style = tcell.StyleDefault.Foreground(color.Purple)
 		content = "flogo: programmer error (build)"
 	}
-	u.drawContent(content, style)
+	u.drawBuildOutput(0, 1, content, style)
 }
 
-func (u *uiTcell) drawContent(content string, style tcell.Style) {
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		if i < 15 { // Limit number of lines to avoid overflow
-			u.drawText(1, 3+i, tcell.StyleDefault.Foreground(color.White), line)
-		} else if i == 15 {
-			u.drawText(1, 3+i, tcell.StyleDefault.Foreground(color.White), "... (more errors)")
-			break
-		}
+// Given some build output, add styling and fit it to screen
+func (u *uiTcell) drawBuildOutput(start_x, start_y int, content string, style tcell.Style) {
+	parsed, err := parseGoBuildOutput(content)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to parse go build output")
+		return
 	}
+	styled := make([]*styledText, 0)
+	filename_style := tcell.StyleDefault.Foreground(color.Blue)
+	error_style := tcell.StyleDefault.Foreground(color.Red)
+	for _, p := range parsed {
+		styled = append(styled, &styledText{
+			style: filename_style,
+			text:  fmt.Sprintf("%s:%d:%d ", p.Filename, p.Line, p.Column),
+		})
+		styled = append(styled, &styledText{
+			style: error_style,
+			text:  p.Message + "\n",
+		})
+	}
+
+	max_x, max_y := u.screen.Size()
+	sections, err := fitToScreen(start_x, start_y, max_x, max_y, styled)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to fit to screen")
+		return
+	}
+	u.drawStyledTextBottom(start_x, start_y, sections)
 }
 func (u *uiTcell) drawCompilation(state *state.Flogo) {
 	u.drawText(0, 1, tcell.StyleDefault.Foreground(color.Yellow), "Compiling...")
@@ -146,7 +224,7 @@ func (u *uiTcell) drawRunning(s *state.Runner) {
 		if s.RunCurrent == nil {
 			u.drawText(0, 1, tcell.StyleDefault, "flogo: no runCurrent.")
 		} else if len(s.RunCurrent.Output) > 0 {
-			DrawBytesMultiline(u.screen, 0, 1, tcell.StyleDefault, s.RunCurrent.Output)
+			u.drawBytesMultiline(0, 1, s.RunCurrent.Output)
 		} else if s.RunPrevious == nil {
 			u.drawText(0, 1, tcell.StyleDefault, "flogo: no runPrevious.")
 		} else {
