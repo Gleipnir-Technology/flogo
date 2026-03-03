@@ -43,6 +43,7 @@ type Process struct {
 	chanStdout chan []byte
 	cmd        *exec.Cmd
 	dir        string
+	isRunning  bool
 	target     string
 }
 
@@ -56,6 +57,7 @@ func New(target string, args ...string) *Process {
 		chanStderr: make(chan []byte),
 		chanStdout: make(chan []byte),
 		cmd:        nil,
+		isRunning:  false,
 		target:     target,
 	}
 }
@@ -113,6 +115,7 @@ func (p *Process) Start(ctx context.Context) error {
 		return fmt.Errorf("Failed to start '%s': %w", p.target, err)
 	}
 	log.Debug().Str("target", p.target).Msg("started process")
+	p.isRunning = true
 	go p.OnEvent.Publish(EventProcess{
 		Data:         []byte{},
 		ProcessState: nil,
@@ -143,6 +146,7 @@ func (p *Process) Start(ctx context.Context) error {
 		if err != nil {
 			fmt.Printf("Got error on cmd.Wait(): %v\n", err)
 		}
+		p.isRunning = false
 		log.Debug().Str("target", p.target).Msg("ended process")
 		go p.OnEvent.Publish(EventProcess{
 			Data:         []byte{},
@@ -157,6 +161,9 @@ func (p *Process) Start(ctx context.Context) error {
 // Signal the process to stop. Wait for it to complete, or for 3 seconds to pass, then
 // actively kill. This function does not return until the child is dead
 func (p *Process) Stop() {
+	if !p.isRunning {
+		return
+	}
 	sub_event := p.OnEvent.Subscribe()
 	defer sub_event.Close()
 

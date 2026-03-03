@@ -62,6 +62,7 @@ func (b *Builder) Run(ctx context.Context) error {
 			}
 		case <-b.ToBuild:
 			debounce(func() {
+				p.Stop()
 				err := p.Start(ctx)
 				if err != nil {
 					logger.Error().Err(err).Msg("failed to start")
