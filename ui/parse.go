@@ -30,7 +30,12 @@ func parseGoBuildOutput(output string) ([]BuildOutputLineGo, error) {
 
 		matches := pattern.FindStringSubmatch(line)
 		if matches == nil {
-			// Line doesn't match expected format, skip it
+			result = append(result, BuildOutputLineGo{
+				Filename: "none",
+				Line:     0,
+				Column:   0,
+				Message:  line,
+			})
 			continue
 		}
 

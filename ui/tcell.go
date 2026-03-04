@@ -189,6 +189,10 @@ func (u *uiTcell) drawBuildOutput(start_x, start_y int, content string, style tc
 		log.Error().Err(err).Msg("failed to parse go build output")
 		return
 	}
+	if len(parsed) == 0 {
+		log.Warn().Str("content", content).Msg("No parsed lines!")
+		return
+	}
 	styled := make([]*styledText, 0)
 	filename_style := tcell.StyleDefault.Foreground(color.Blue)
 	error_style := tcell.StyleDefault.Foreground(color.Red)
