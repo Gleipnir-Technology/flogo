@@ -190,8 +190,8 @@ func (mgr *flogoStateManager) handleEventRunner(logger zerolog.Logger, evt Event
 		mgr.state.Runner.RunCurrent = evt.Process
 		//logger.Debug().Msg("runner output")
 		p := evt.Process
-		logger.Info().
-			Bytes("output", p.Output).
+		logger.Debug().
+			//Bytes("output", p.Output).
 			Bytes("stderr", p.Stderr).
 			Bytes("stdout", p.Stdout).
 			Send()
