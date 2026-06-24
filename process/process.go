@@ -144,7 +144,7 @@ func (p *Process) Start(ctx context.Context) error {
 	go func() {
 		s, err := p.cmd.Process.Wait()
 		if err != nil {
-			fmt.Printf("Got error on cmd.Wait(): %v\n", err)
+			log.Warn().Err(err).Msg("Got error on cmd.Wait()")
 		}
 		p.isRunning = false
 		log.Debug().Str("target", p.target).Msg("ended process")

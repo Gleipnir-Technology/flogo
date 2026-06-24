@@ -139,11 +139,13 @@ func (web *Webserver) Run(ctx context.Context, chanOnState <-chan *state.Flogo, 
 }
 
 func (web *Webserver) fanoutStateChanges(ctx context.Context, chanOnState <-chan *state.Flogo) {
+	logger := log.Ctx(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case state := <-chanOnState:
+			logger.Debug().Msg("new state in webserver for fanout")
 			for c, _ := range web.connections {
 				c.chanState <- state
 			}
@@ -187,6 +189,7 @@ func (web *Webserver) sseHandler(w http.ResponseWriter, r *http.Request) {
 			// Send a heartbeat message
 			err = connection.SendHeartbeat(w, t)
 		case state := <-connection.chanState:
+			log.Debug().Msg("Sending new state to connection")
 			err = connection.SendState(w, state)
 		}
 		if err != nil {

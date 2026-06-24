@@ -130,7 +130,6 @@ func (mgr *flogoStateManager) Run(root_logger zerolog.Logger, u ui.UI, bind stri
 		case evt := <-mgr.chanOnUI:
 			mgr.handleEventUI(logger, u, evt)
 		}
-		//mgr.chanDoWebserver <- mgr.state
 	}
 	logger.Debug().Msg("Exiting state run loop")
 	cancel()
